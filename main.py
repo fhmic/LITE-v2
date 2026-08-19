@@ -77,7 +77,7 @@ from actions.proactive         import ProactiveEngine
 from actions.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
-from actions.web_search        import _news as _fetch_news_sync
+from actions.web_search        import _opportunities_brief_sync as _fetch_opportunities_sync
 from memory.config_manager     import get_brief_enabled
 
 
@@ -150,7 +150,10 @@ TOOL_DECLARATIONS = [
         "description": (
             "Searches the web. Use for ANY question about current facts, events, prices, "
             "or topics — always prefer this over guessing. "
-            "Modes: 'search' (default), 'news' (latest headlines on a topic), "
+            "Modes: 'opportunities' (business/income ideas, side hustles, international/remote "
+            "gigs, arbitrage — LITE's primary mode, use this whenever the user asks what's out "
+            "there or how to make money), 'search' (default general lookup), "
+            "'news' (latest headlines on a topic), "
             "'research' (deep comprehensive answer), 'price' (product cost lookup), "
             "'compare' (side-by-side comparison of items)."
         ),
@@ -158,7 +161,7 @@ TOOL_DECLARATIONS = [
             "type": "OBJECT",
             "properties": {
                 "query":  {"type": "STRING", "description": "Search query or topic"},
-                "mode":   {"type": "STRING", "description": "search | news | research | price | compare"},
+                "mode":   {"type": "STRING", "description": "opportunities | search | news | research | price | compare"},
                 "items":  {"type": "ARRAY",  "items": {"type": "STRING"}, "description": "Items to compare (compare mode)"},
                 "aspect": {"type": "STRING", "description": "Comparison aspect: price | specs | reviews | features"},
             },
@@ -529,7 +532,9 @@ TOOL_DECLARATIONS = [
             "Use 'add' when the user says 'monitor X', 'track X', 'follow X'. "
             "Use 'remove' when the user says 'stop monitoring X'. "
             "Use 'list' when the user asks what is being monitored. "
-            "Do NOT add crypto, financial, or trading topics."
+            "Finance, crypto, market, and business topics are fully in scope — encourage "
+            "monitoring them, since tracking developments in the user's ventures and markets "
+            "is core to LITE's mission."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -643,7 +648,10 @@ TOOL_DECLARATIONS = [
                     "description": (
                         "identity — name, age, birthday, city, job, language, nationality | "
                         "preferences — favorite food/color/music/film/game/sport, hobbies | "
-                        "projects — active projects, goals, things being built | "
+                        "projects — active technical/personal projects, goals, things being built | "
+                        "business — income ventures being pursued, opportunities evaluated "
+                        "(accepted/rejected), revenue targets, deadlines, capital committed — "
+                        "LITE's core mission category, update this actively | "
                         "relationships — friends, family, partner, colleagues | "
                         "wishes — future plans, things to buy, travel dreams | "
                         "notes — habits, schedule, anything else worth remembering"
@@ -1236,13 +1244,15 @@ class LiteLive:
         """
         Two-phase briefing optimized for speed:
           Phase 1 — instant greeting (no tools) → speech starts in <1s
-          Phase 2 — news pre-fetched in a background thread while Phase 1 plays,
-                    delivered as ready text (no Gemini tool-call round-trip) and
-                    shown on the UI content panel. Waits for turn_complete event
-                    instead of a fixed sleep so there is no unnecessary gap.
+          Phase 2 — today's business/income opportunities pre-fetched in a
+                    background thread while Phase 1 plays, delivered as ready
+                    text (no Gemini tool-call round-trip) and shown on the UI
+                    content panel. Waits for turn_complete event instead of a
+                    fixed sleep so there is no unnecessary gap.
         """
         memory   = load_memory()
         identity = memory.get("identity", {})
+        business = memory.get("business", {})
 
         def _val(k: str) -> str:
             e = identity.get(k, {})
@@ -1257,9 +1267,19 @@ class LiteLive:
         name = _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
-        # Start fetching news immediately — runs in parallel while phase 1 plays
+        # Focus the opportunity scan on whatever active ventures are stored,
+        # if any — otherwise it defaults to a broad international scan.
+        biz_focus = ""
+        if business:
+            biz_terms = [
+                (e.get("value") if isinstance(e, dict) else str(e))
+                for e in list(business.values())[:3]
+            ]
+            biz_focus = ", ".join(t for t in biz_terms if t)
+
+        # Start fetching opportunities immediately — runs in parallel while phase 1 plays
         loop = asyncio.get_event_loop()
-        news_future = loop.run_in_executor(None, _fetch_news_sync, "top world news today")
+        news_future = loop.run_in_executor(None, _fetch_opportunities_sync, biz_focus)
 
         await asyncio.sleep(0.3)
         if not self.session:
@@ -1283,7 +1303,8 @@ class LiteLive:
             )
 
         p1 = (
-            f"Greet the user warmly, mention it is {time_str}, and say you are fetching today's news now.{session_clause} "
+            f"Greet the user warmly, mention it is {time_str}, and say you are pulling today's "
+            f"business and income opportunities now.{session_clause} "
             f"Keep it to 2 short sentences max. Do not call any tools.{lang_clause}{name_clause}"
         )
 
@@ -1332,16 +1353,17 @@ class LiteLive:
 
                 if news_text and len(news_text) > 60:
                     # Show on UI content panel immediately
-                    self.ui.show_content("NEWS — top world news today", news_text)
+                    self.ui.show_content("OPPORTUNITIES — today's business & income brief", news_text)
 
                     p2 = (
-                        f"[BRIEFING] Here are today's top news headlines:\n{news_text}\n\n"
-                        "Pick ONE headline, summarise it in one sentence, then say the full list "
+                        f"[BRIEFING] Here is today's business & income opportunities brief:\n{news_text}\n\n"
+                        "Pick the single strongest opportunity, summarise it in one or two sentences "
+                        "including the next concrete action, then say the full breakdown "
                         f"is displayed on screen. Do not call any tools.{lang_str}"
                     )
                 else:
                     p2 = (
-                        "News headlines could not be fetched right now. "
+                        "Today's opportunities brief could not be fetched right now. "
                         f"Let the user know briefly.{lang_str}"
                     )
 
@@ -1349,7 +1371,7 @@ class LiteLive:
                     turns={"parts": [{"text": p2}]},
                     turn_complete=True,
                 )
-                self.ui.write_log("SYS: Briefing phase 2 (news) sent.")
+                self.ui.write_log("SYS: Briefing phase 2 (opportunities) sent.")
             except Exception as e:
                 print(f"[Briefing] Phase 2 error: {e}")
                 self.ui.write_log(f"SYS: Briefing phase 2 failed: {e}")

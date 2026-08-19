@@ -410,6 +410,75 @@ def _price(query: str) -> str:
     return _format_ddg(query, results)
 
 
+def _opportunities(query: str) -> str:
+    """
+    LITE's core mode: surfaces real, executable business / income opportunities
+    for today, tailored to an internationally-minded operator based in Nigeria
+    (Lagos) with a finance/fintech-builder background. Realisable AND aggressive
+    options are both in scope — each must come with an actual next step, not
+    just a description.
+
+    Pipeline: DDG pulls today's signal (fresh listings, market moves, demand
+    spikes, funding/grant news, remote-work trends) across several angles,
+    then the shared AI-client fallback chain (Gemini → Claude → Groq → custom)
+    turns that into a structured, actionable brief. Falls back to raw DDG
+    results if no synthesis provider is configured or all fail.
+    """
+    focus = query.strip() if query.strip() else "international remote income and business opportunities"
+
+    search_angles = [
+        f"{focus} opportunities today",
+        f"{focus} high demand international remote work {datetime_today()}",
+        f"{focus} arbitrage or underpriced market gap",
+        f"new grants funding programs {focus}",
+    ]
+
+    combined_results = []
+    for angle in search_angles:
+        try:
+            combined_results.extend(_ddg_news(angle, max_results=4) or _ddg_search(angle, max_results=4))
+        except Exception as e:
+            print(f"[WebSearch] ⚠️ Opportunities angle failed ({angle!r}): {e}")
+
+    results_text = _format_ddg(focus, combined_results) if combined_results else f"No fresh signal found for: {focus}"
+
+    brief_prompt = (
+        "You are a sharp, no-fluff business intelligence analyst working for a chartered "
+        "accountant and fintech builder based in Lagos, Nigeria, who wants to build genuine "
+        "income streams alongside his 9-to-5 — international-first where possible.\n\n"
+        f"Focus area: {focus}\n\n"
+        f"Raw signal gathered today:\n{results_text}\n\n"
+        "Produce 3-5 concrete opportunities. For EACH one give, tersely:\n"
+        "1. What it is (one line)\n"
+        "2. Why now — the signal that makes it timely\n"
+        "3. Realistic income potential and time-to-first-dollar\n"
+        "4. Capital/skills required\n"
+        "5. Risk level: Conservative / Moderate / Aggressive\n"
+        "6. The very next concrete action to take today\n\n"
+        "Prioritize opportunities executable remotely/internationally and that leverage "
+        "finance, accounting, or software skills where relevant, but don't force-fit — "
+        "include genuinely strong options outside that lane too. Be specific, not generic. "
+        "No disclaimers, no filler."
+    )
+
+    provider = _get_search_provider()
+    if provider != "skip":
+        try:
+            from core.ai_client import generate_content
+            resp = generate_content(brief_prompt)
+            if resp and resp.text and len(resp.text.strip()) > 60:
+                return resp.text.strip()
+        except Exception as e:
+            print(f"[WebSearch] ⚠️ Opportunities synthesis failed ({e}) — returning raw signal")
+
+    return f"Opportunity signal — {focus}\n\n{results_text}"
+
+
+def datetime_today() -> str:
+    from datetime import datetime as _dt
+    return _dt.now().strftime("%Y")
+
+
 def _compare(items: list[str], aspect: str) -> str:
     query = (
         f"Compare {', '.join(items)} in terms of {aspect}. "
@@ -448,6 +517,19 @@ def _compare(items: list[str], aspect: str) -> str:
     return "\n".join(lines)
 
 
+def _opportunities_brief_sync(query: str = "") -> str:
+    """
+    Thin synchronous wrapper around _opportunities() for callers (like the
+    startup briefing) that just need a ready block of text on a background
+    thread — same shape/usage as _news() for that purpose.
+    """
+    try:
+        return _opportunities(query)
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Opportunities brief failed ({e})")
+        return ""
+
+
 # ── Public entry point ─────────────────────────────────────────────────────────
 
 def web_search(
@@ -482,6 +564,8 @@ def web_search(
             return _research(query)
         if mode == "price":
             return _price(query)
+        if mode == "opportunities":
+            return _opportunities(query)
         return _search(query)
 
     except Exception as e:
@@ -491,6 +575,9 @@ def web_search(
         try:
             if mode == "news":
                 return _format_news(query or "world news today", _ddg_news(query or "world news today"))
+            if mode == "opportunities":
+                fallback_focus = query or "international remote income and business opportunities"
+                return _format_ddg(fallback_focus, _ddg_search(fallback_focus + " opportunities today"))
             return _format_ddg(query, _ddg_search(query or " ".join(items)))
         except Exception as e2:
             print(f"[WebSearch] ❌ All backends failed: {e2}")

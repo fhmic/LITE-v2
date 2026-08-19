@@ -22,6 +22,7 @@ def _empty_memory() -> dict:
         "identity":      {},
         "preferences":   {},
         "projects":      {},
+        "business":      {},
         "relationships": {},
         "wishes":        {},
         "notes":         {},
@@ -152,6 +153,15 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         lines.append("")
         lines.append("Active Projects / Goals:")
         for key, entry in list(projects.items())[:8]:
+            val = entry.get("value") if isinstance(entry, dict) else entry
+            if val:
+                lines.append(f"  - {key.replace('_', ' ').title()}: {val}")
+
+    business = memory.get("business", {})
+    if business:
+        lines.append("")
+        lines.append("Business Ventures / Income Goals (LITE's core focus — reference actively):")
+        for key, entry in list(business.items())[:12]:
             val = entry.get("value") if isinstance(entry, dict) else entry
             if val:
                 lines.append(f"  - {key.replace('_', ' ').title()}: {val}")

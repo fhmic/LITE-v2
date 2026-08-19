@@ -1,7 +1,9 @@
 """
 BackgroundMonitor — user-configured topic watching.
 Checks DDG news once per day per topic; alerts LITE when a new headline appears.
-No crypto, no finance, no uninvited tracking.
+Finance, crypto, and market topics are fully in scope — tracking them daily is
+core to LITE's business-intelligence mission. No uninvited tracking: monitors
+are only ever added when the user explicitly asks.
 """
 import hashlib
 import json
@@ -9,20 +11,9 @@ import re
 from datetime import datetime
 
 
-# ── Blocked categories (never monitor regardless of what user says) ────────────
-
-_BLOCKED = {
-    # Marka / varlık adları — her dilde aynı yazılır
-    "bitcoin", "ethereum", "dogecoin", "solana", "binance",
-    "nft", "blockchain", "defi", "altcoin", "memecoin", "coin", "token",
-    # "kripto" kökünün farklı dillerdeki yazılışları
-    "crypto", "kripto", "cripto", "krypto", "крипто", "仮想通貨", "暗号資産",
-    "cryptocurrency",
-}
-
 def _is_blocked(topic: str) -> bool:
-    t = topic.lower()
-    return any(word in t for word in _BLOCKED)
+    # No categories are blocked — finance/crypto/market monitoring is the point.
+    return False
 
 
 # ── Slug / hash helpers ────────────────────────────────────────────────────────
@@ -59,8 +50,6 @@ def add_monitor(topic: str) -> str:
     topic = topic.strip()
     if not topic:
         return "Please specify a topic to monitor."
-    if _is_blocked(topic):
-        return "I don't monitor crypto or financial topics."
     monitors = _load()
     slug = _slug(topic)
     if slug in monitors:
