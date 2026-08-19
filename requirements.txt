@@ -1,0 +1,44 @@
+PyQt6
+PyQt6-WebEngine
+sounddevice
+google-genai
+google-generativeai
+anthropic
+pillow
+requests
+beautifulsoup4
+ddgs
+pyflakes
+playwright
+pyautogui
+pyperclip
+pygetwindow
+opencv-python
+numpy
+mss
+psutil
+send2trash
+youtube-transcript-api
+python-pptx
+fastapi
+uvicorn[standard]
+cryptography
+python-multipart
+comtypes; sys_platform == "win32"
+pycaw; sys_platform == "win32"
+win10toast; sys_platform == "win32"
+pywinauto; sys_platform == "win32"
+pywin32; sys_platform == "win32"
+qrcode[pil]
+
+# Optional — only needed for fallback voice mode (used automatically when
+# Gemini Live is unavailable and a Claude/custom text provider is
+# configured). Skip these if you don't want that feature; the rest of the
+# app runs fine without them.
+faster-whisper
+edge-tts
+miniaudio
+
+# Optional — global mute hotkey (works even when LITE's window isn't
+# focused). Skip if you're fine with the in-app mute button / F4 only.
+pynput

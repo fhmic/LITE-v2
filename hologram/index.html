@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>L.I.T.E.</title>
+<link rel="icon" href="favicon.ico" type="image/x-icon">
+<style>
+  :root{
+    --bg:      #00060a;
+    --panel:   #010d14;
+    --border:  #0c2d1a;
+    --border-b:#1a5c33;
+    --pri:     #00ff41;
+    --pri-dim: #00a82c;
+    --pri-ghost: rgba(0,255,65,0.08);
+    --acc2:    #ffcc00;
+    --speak:   #39ff14;
+    --red:     #ff3355;
+    --text:    #baffb0;
+    --text-dim:#3a8a52;
+    --sleep:   #4a6a5a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    width:100%; height:100%; overflow:hidden;
+    background: radial-gradient(ellipse at 50% 30%, #001008 0%, var(--bg) 70%);
+    font-family:'Courier New', ui-monospace, monospace;
+    color:var(--text);
+  }
+  #scene{ position:fixed; inset:0; z-index:1; }
+
+  #filmgrain{
+    position:fixed; inset:0; z-index:5; pointer-events:none;
+    background:
+      repeating-linear-gradient(0deg, rgba(0,255,65,0.02) 0px, rgba(0,255,65,0.02) 1px, transparent 1px, transparent 3px),
+      radial-gradient(ellipse at center, transparent 55%, rgba(0,2,4,0.75) 100%);
+    mix-blend-mode: screen;
+    opacity:0.9;
+  }
+
+  .hud{ position:fixed; z-index:10; pointer-events:none; }
+  .hud *{ pointer-events:auto; }
+
+  .corner{
+    position:fixed; width:56px; height:56px; z-index:9; opacity:.75;
+  }
+  .corner.tl{ top:16px; left:16px; border-top:2px solid var(--border-b); border-left:2px solid var(--border-b); }
+  .corner.tr{ top:16px; right:16px; border-top:2px solid var(--border-b); border-right:2px solid var(--border-b); }
+  .corner.bl{ bottom:16px; left:16px; border-bottom:2px solid var(--border-b); border-left:2px solid var(--border-b); }
+  .corner.br{ bottom:16px; right:16px; border-bottom:2px solid var(--border-b); border-right:2px solid var(--border-b); }
+
+  /* ================= TOP-LEFT: wordmark + subtitle ================= */
+  .brand{ top:26px; left:36px; display:flex; flex-direction:column; gap:3px; }
+  .brand .mark{
+    font-size:21px; font-weight:bold; letter-spacing:6px;
+    color:var(--pri); text-shadow:0 0 10px var(--pri), 0 0 24px rgba(0,255,65,.45);
+  }
+  .brand .subtitle{
+    font-size:8px; letter-spacing:1.6px; color:var(--text-dim);
+    max-width:260px;
+  }
+
+  /* ================= CENTER: state indicator + waveform (over the core) ================= */
+  .center-stack{
+    top:50%; left:50%; transform:translate(-50%, 230px);
+    display:flex; flex-direction:column; align-items:center; gap:14px;
+    width:100%; pointer-events:none;
+  }
+  .status{
+    font-size:11px; letter-spacing:4px; color:var(--state-color, var(--pri));
+    text-shadow:0 0 8px var(--state-color, var(--pri));
+    transition:color .4s ease;
+  }
+  .status::before{
+    content:'●'; margin-right:8px; display:inline-block;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .waveform{
+    display:flex; align-items:flex-end; gap:3px; height:30px;
+  }
+  .waveform .bar{
+    width:3px; background:var(--state-color, var(--pri));
+    box-shadow:0 0 6px var(--state-color, var(--pri));
+    border-radius:2px; transition:background .4s ease;
+    animation: wave 1.1s ease-in-out infinite;
+  }
+
+  /* ================= TOP-RIGHT: clock -> weather -> log ================= */
+  .right-stack{
+    top:22px; right:32px; width:252px;
+    display:flex; flex-direction:column; gap:10px; align-items:flex-end;
+  }
+  .clock{
+    text-align:right; line-height:1.15;
+  }
+  .clock .time{
+    font-size:22px; font-weight:bold; letter-spacing:2px; color:var(--pri);
+    text-shadow:0 0 10px var(--pri);
+  }
+  .clock .date{
+    font-size:9px; letter-spacing:2px; color:var(--text-dim); margin-top:2px;
+  }
+
+  .panel{
+    background:linear-gradient(180deg, var(--panel), rgba(1,13,20,.55));
+    border:1px solid var(--border); border-radius:3px;
+    width:100%;
+  }
+  .panel .hdr{
+    font-size:8px; letter-spacing:2px; color:var(--pri-dim);
+    padding:7px 10px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:6px;
+  }
+  .panel .hdr .dot{ width:5px; height:5px; border-radius:50%; background:var(--pri); box-shadow:0 0 5px var(--pri); }
+
+  .weather{ padding:9px 11px 10px; }
+  .weather .top-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  .weather .city{ font-size:9.5px; color:var(--pri); letter-spacing:.5px; font-weight:bold; }
+  .weather .current{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .weather .icon{ font-size:22px; filter:drop-shadow(0 0 5px var(--pri-ghost)); line-height:1; }
+  .weather .temp{ font-size:18px; font-weight:bold; color:var(--text); line-height:1.1; }
+  .weather .cond{ font-size:8px; color:var(--text-dim); margin-top:1px; }
+  .weather .wind{ font-size:7.5px; color:var(--text-dim); margin-left:auto; align-self:flex-start; }
+  .weather .fc-row{ display:flex; gap:3px; border-top:1px solid var(--border); padding-top:7px; }
+  .weather .fc-day{
+    flex:1; text-align:center; border:1px solid var(--border); border-radius:2px;
+    padding:4px 2px; background:rgba(0,255,65,0.02);
+  }
+  .weather .fc-day .d{ font-size:6.5px; letter-spacing:.5px; color:var(--text-dim); }
+  .weather .fc-day .i{ font-size:12px; margin:2px 0; }
+  .weather .fc-day .hl{ font-size:6.5px; color:var(--text); }
+  .weather .fc-day .hl b{ color:var(--pri); }
+
+  .log{ padding:8px 10px 10px; font-size:9.5px; line-height:1.65; color:var(--text-dim); max-height:150px; overflow:hidden; }
+  .log .line{ opacity:0; animation: fadeIn .5s ease forwards; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .log .line .t{ color:var(--pri-dim); margin-right:6px; }
+
+  /* ================= LEFT: icon row -> preview state -> command input ================= */
+  .left-stack{
+    top:50%; left:34px; transform:translateY(-50%);
+    display:flex; flex-direction:column; gap:12px; width:200px;
+  }
+  .icon-row{ display:flex; gap:8px; }
+  .ctrl-btn{
+    width:34px; height:34px; border-radius:50%;
+    background:var(--panel); border:1px solid var(--border-b);
+    color:var(--text-dim); font-size:13px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; transition:all .2s ease;
+  }
+  .ctrl-btn:hover{ color:var(--pri); border-color:var(--pri); box-shadow:0 0 12px var(--pri-ghost); }
+  .ctrl-btn.active{ color:var(--red); border-color:var(--red); box-shadow:0 0 12px rgba(255,51,85,.4); }
+
+  .demo-panel{ padding:10px 12px 12px; }
+  .demo-panel .hdr{ padding:0 0 8px; border:none; }
+  .state-btn{
+    background:transparent; border:1px solid var(--border); color:var(--text-dim);
+    font-family:inherit; font-size:10px; letter-spacing:.5px;
+    padding:6px 8px; border-radius:3px; cursor:pointer; text-align:left;
+    transition:all .2s ease; width:100%; margin-bottom:5px;
+  }
+  .state-btn:last-child{ margin-bottom:0; }
+  .state-btn:hover{ border-color:var(--border-b); color:var(--text); }
+  .state-btn.active{ background:var(--pri-ghost); border-color:var(--pri); color:var(--pri); box-shadow:0 0 8px var(--pri-ghost); }
+  .state-btn.demo{ border-style:dashed; }
+
+  /* Command input, styled after the reference screenshot */
+  .cmd-input{ padding:9px 12px 11px; }
+  .cmd-input .hdr{ padding:0 0 7px; border:none; font-size:8px; }
+  .cmd-input .field{
+    display:flex; align-items:center; gap:6px;
+    border-top:1px solid var(--border); padding-top:8px;
+    font-size:12px; color:var(--text);
+  }
+  .cmd-input .prompt{ color:var(--pri); }
+  .cmd-input input{
+    flex:1; background:transparent; border:none; outline:none;
+    color:var(--text); font-family:inherit; font-size:12px; letter-spacing:.3px;
+  }
+  .cmd-input input::placeholder{ color:var(--text-dim); }
+  .cmd-input .cursor{
+    width:7px; height:14px; background:var(--pri); box-shadow:0 0 6px var(--pri);
+    animation: blink 1s step-end infinite; flex-shrink:0;
+  }
+
+  /* Tiny file-upload strip, tucked under command input */
+  .fileup{
+    display:flex; align-items:center; gap:6px;
+    font-size:8.5px; letter-spacing:1px; color:var(--text-dim);
+    padding:6px 12px; border-top:1px dashed var(--border);
+    cursor:pointer; transition:color .2s ease;
+  }
+  .fileup:hover{ color:var(--pri); }
+  .fileup .ic{ font-size:10px; }
+
+  /* ================= Transient toast notifications ================= */
+  .toast-layer{
+    top:50%; left:50%; width:0; height:0; pointer-events:none;
+  }
+  .toast{
+    position:fixed; width:320px; max-height:50vh; display:flex; flex-direction:column;
+    text-align:center;
+    background:linear-gradient(180deg, var(--panel), rgba(1,13,20,.85));
+    border:1px solid var(--border-b); border-radius:4px;
+    padding:10px 16px; box-shadow:0 0 24px rgba(0,255,65,.12);
+    opacity:0; transform:translateY(8px);
+    animation: toastIn .4s ease forwards;
+    cursor:grab; pointer-events:auto; z-index:22; /* above the settings modal (20) so alerts are never hidden behind it */
+    overflow:hidden; /* .v below scrolls internally instead of the box growing past the viewport */
+  }
+  .toast.dragging{ cursor:grabbing; box-shadow:0 0 32px rgba(0,255,65,.25); }
+  .toast.dismissing{ animation: toastOut .35s ease forwards; }
+  .toast .k{
+    font-size:8px; letter-spacing:2px; color:var(--pri-dim); margin-bottom:4px;
+    display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+  }
+  .toast .k .drag-hint{ opacity:.5; font-size:7px; letter-spacing:1px; }
+  .toast .v{
+    font-size:11px; color:var(--text); letter-spacing:.5px; text-align:left;
+    overflow-y:auto; max-height:calc(50vh - 34px); padding-right:4px;
+  }
+
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  @keyframes fadeIn{ to{opacity:1;} }
+  @keyframes wave{ 0%,100%{ transform:scaleY(.3);} 50%{ transform:scaleY(1);} }
+  @keyframes blink{ 50%{ opacity:0; } }
+  @keyframes toastIn{ to{ opacity:1; transform:translateY(0); } }
+  @keyframes toastOut{ to{ opacity:0; transform:translateY(-8px); } }
+
+  /* ================= content display panel ================= */
+  .content-panel{
+    bottom:22px; left:50%; transform:translateX(-50%);
+    width:min(560px, 70vw); max-height:38vh;
+    display:none; z-index:22; /* above the settings modal (20) so results are never hidden behind it */
+  }
+  .content-panel.visible{ display:block; }
+  .cp-inner .hdr{ display:flex; align-items:center; justify-content:space-between; }
+  .cp-close{ cursor:pointer; color:var(--text-dim); padding:0 4px; }
+  .cp-close:hover{ color:var(--red); }
+  .cp-body{
+    padding:10px 12px 12px; font-size:10.5px; line-height:1.6; color:var(--text);
+    max-height:calc(38vh - 34px); overflow-y:auto; white-space:pre-wrap;
+  }
+
+  /* ================= camera preview overlay ================= */
+  .camera-panel{
+    top:110px; left:50%; transform:translateX(-50%);
+    width:260px; display:none;
+    border:1px solid var(--border-b); border-radius:4px; overflow:hidden;
+    box-shadow:0 0 20px rgba(0,255,65,.15);
+  }
+  .camera-panel.visible{ display:block; }
+  .camera-panel img{ width:100%; display:block; }
+
+  /* ================= remote control (QR code) ================= */
+  .remote-panel{
+    inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(0,4,6,0.88); z-index:23; /* above the settings modal and toasts */
+  }
+  .remote-panel.visible{ display:flex; }
+  .remote-inner{ width:280px; }
+  .remote-inner .hdr{ display:flex; align-items:center; justify-content:space-between; }
+  .remote-body{ padding:16px 18px 18px; text-align:center; }
+  .remote-body img{
+    width:190px; height:190px; background:#fff; border-radius:6px; padding:8px;
+    display:none; /* JS reveals this once a QR image is actually available */
+  }
+  .remote-noqr{ font-size:9px; color:var(--text-dim); line-height:1.6; padding:20px 6px; }
+  .remote-hint{ font-size:8.5px; color:var(--text-dim); margin:10px 0 12px; line-height:1.5; }
+  .remote-manual{ font-size:9px; color:var(--text); word-break:break-all; margin-top:6px; text-align:left; }
+  .remote-manual b{ color:var(--pri-dim); font-weight:normal; letter-spacing:1px; font-size:8px; }
+  .remote-manual span{ color:var(--pri); }
+
+  /* ================= setup modal ================= */
+  .setup-modal{
+    inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(0,4,6,0.88); z-index:20;
+  }
+  .setup-modal.visible{ display:flex; }
+  .setup-box{ width:340px; max-height:78vh; overflow-y:auto; }
+  .setup-box .hdr{
+    font-size:10.5px; padding:12px 14px; letter-spacing:1.5px;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+  }
+  .setup-back{
+    font-size:9px; letter-spacing:1px; color:var(--text-dim); cursor:pointer;
+    padding:3px 6px; border-radius:3px; transition:color .2s ease; flex-shrink:0;
+  }
+  .setup-back:hover{ color:var(--pri); }
+  .setup-back.hidden{ visibility:hidden; }
+  .setup-body{ padding:14px 18px 18px; }
+  .setup-note{ font-size:8.5px; color:var(--text-dim); line-height:1.6; margin-bottom:14px; }
+  .setup-body label{
+    display:block; font-size:8px; letter-spacing:1.5px; color:var(--pri-dim);
+    margin:12px 0 5px;
+  }
+  .setup-body label .dim{ color:var(--text-dim); letter-spacing:0; text-transform:none; }
+  .setup-body input, .setup-body select{
+    width:100%; background:#000d08; color:var(--text);
+    border:1px solid var(--border); border-radius:3px; padding:7px 9px;
+    font-family:inherit; font-size:10.5px; outline:none;
+  }
+  .setup-body input:focus, .setup-body select:focus{ border-color:var(--pri); }
+  .setup-submit{
+    width:100%; margin-top:18px; padding:10px;
+    background:transparent; border:1px solid var(--pri-dim); border-radius:3px;
+    color:var(--pri); font-family:inherit; font-size:10.5px; letter-spacing:1px;
+    cursor:pointer; transition:all .2s ease;
+  }
+  .setup-submit:hover{ background:var(--pri-ghost); border-color:var(--pri); }
+
+  /* Main menu — one page at a time; sub-pages hidden until navigated to */
+  .setup-page.hidden{ display:none; }
+  .menu-btn{
+    display:block; width:100%; margin-top:8px; padding:11px 12px; text-align:left;
+    background:transparent; border:1px solid var(--border); border-radius:3px;
+    color:var(--text); font-family:inherit; font-size:10.5px; letter-spacing:.5px;
+    cursor:pointer; transition:all .2s ease;
+  }
+  .menu-btn:hover{ border-color:var(--pri); background:var(--pri-ghost); color:var(--pri); }
+  .menu-btn:first-child{ margin-top:0; }
+
+  .toggle-btn{
+    width:100%; margin-top:8px; padding:8px 10px; text-align:left;
+    background:transparent; border:1px solid var(--border); border-radius:3px;
+    color:var(--text-dim); font-family:inherit; font-size:9.5px; letter-spacing:.5px;
+    cursor:pointer; transition:all .2s ease;
+  }
+  .toggle-btn:hover{ color:var(--text); border-color:var(--border-b); }
+  .toggle-btn.on{
+    background:rgba(0,255,65,0.06); border-color:var(--pri-dim); color:var(--pri);
+  }
+
+  .color-row{ display:flex; align-items:center; gap:10px; }
+  .color-row input[type=color]{
+    width:38px; height:28px; padding:2px; cursor:pointer; flex-shrink:0;
+  }
+
+  .setup-close-btn{
+    width:100%; margin-top:16px; padding:8px;
+    background:transparent; border:1px solid var(--border); border-radius:3px;
+    color:var(--text-dim); font-family:inherit; font-size:9.5px; letter-spacing:1px;
+    cursor:pointer; transition:all .2s ease;
+  }
+  .setup-close-btn:hover{ color:var(--red); border-color:var(--red); }
+  /* ================= Responsive: tablets ================= */
+  @media (max-width: 1024px){
+    .right-stack{ width:200px; right:20px; top:18px; }
+    .left-stack{ width:170px; left:20px; }
+    .brand{ top:18px; left:18px; }
+    .brand .mark{ font-size:18px; }
+    .brand .subtitle{ max-width:190px; font-size:7px; }
+    .clock .time{ font-size:18px; }
+  }
+
+  /* ================= Responsive: phones & small tablets (portrait) ================= */
+  @media (max-width: 720px){
+    .corner{ width:34px; height:34px; }
+    .filmgrain{ opacity:.6; } /* lighter scanline overlay — cheaper to composite on mobile GPUs */
+
+    .brand{ top:12px; left:12px; }
+    .brand .mark{ font-size:14px; letter-spacing:2px; }
+    .brand .subtitle{ display:none; }
+
+    /* Icon row moves to top-right as its own compact bar */
+    .icon-row{
+      position:fixed; top:12px; right:12px; left:auto; z-index:10;
+      gap:6px; pointer-events:auto;
+    }
+    .ctrl-btn{ width:40px; height:40px; font-size:15px; } /* larger touch targets */
+
+    /* Preview state + command input become a full-width bottom dock */
+    .left-stack{
+      top:auto; bottom:12px; left:12px; right:12px; transform:none;
+      width:auto; flex-direction:column;
+    }
+    .left-stack .demo-panel,
+    .left-stack .cmd-input{ width:100%; }
+    .left-stack .demo-panel{ display:none; } /* hidden below 481px, see next query */
+
+    /* Clock/weather/log collapse into a compact top band, full width */
+    .right-stack{
+      top:64px; right:12px; left:12px; width:auto;
+      flex-direction:row; flex-wrap:wrap; align-items:stretch; gap:6px;
+    }
+    .clock{ text-align:left; flex:0 0 auto; }
+    .clock .time{ font-size:16px; }
+    .right-stack .panel{ flex:1 1 130px; }
+    .log{ max-height:70px; }
+
+    .center-stack{ transform:translate(-50%, 60px); }
+    .waveform{ height:20px; }
+    .waveform .bar{ width:2px; }
+
+    .setup-box{ width:94vw; max-height:88vh; }
+    .toast{ width:82vw; }
+  }
+
+  /* Slightly larger phones/small tablets — bring PREVIEW STATE back since
+     there's a bit more vertical room to spare */
+  @media (max-width: 720px) and (min-width: 481px){
+    .left-stack .demo-panel{ display:block; }
+  }
+
+  /* Touch devices generally — keep the drag hint visible since there's no
+     hover to discover it otherwise */
+  @media (hover:none){
+    .toast .drag-hint{ opacity:.75; }
+    .ctrl-btn{ width:40px; height:40px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="scene"></div>
+<div id="filmgrain"></div>
+
+<div class="corner tl"></div>
+<div class="corner tr"></div>
+<div class="corner bl"></div>
+<div class="corner br"></div>
+
+<!-- top-left: wordmark -->
+<div class="hud brand">
+  <div class="mark" id="brandMark">L.I.T.E.</div>
+  <div class="subtitle">EXECUTIVE LOGIC INTELLIGENCE TECHNOLOGY &amp; ENHANCED SUPPORT</div>
+</div>
+
+<!-- center: state indicator + waveform, sitting over the lower core -->
+<div class="hud center-stack">
+  <div class="status" id="statusText">LISTENING</div>
+  <div class="waveform" id="waveform"></div>
+</div>
+
+<!-- top-right: clock, weather, log -->
+<div class="hud right-stack">
+  <div class="clock">
+    <div class="time" id="clockTime">07:33:40</div>
+    <div class="date" id="clockDate">SAT 15 AUG 2026</div>
+  </div>
+
+  <div class="panel weather">
+    <div class="hdr"><span class="dot"></span>WEATHER<span style="margin-left:auto; cursor:pointer;" id="wxRefresh" title="Refresh">⟳</span></div>
+    <div class="top-row">
+      <div class="city" id="wxCity">LAGOS, NG</div>
+    </div>
+    <div class="current">
+      <div class="icon" id="wxIcon">⛅</div>
+      <div>
+        <div class="temp" id="wxTemp">29°C</div>
+        <div class="cond" id="wxCond">Partly cloudy</div>
+      </div>
+      <div class="wind" id="wxWind">Wind: 11 km/h</div>
+    </div>
+    <div class="fc-row" id="wxForecast"></div>
+  </div>
+
+  <div class="panel">
+    <div class="hdr"><span class="dot"></span>SYSTEM LOG</div>
+    <div class="log" id="logLines"></div>
+  </div>
+</div>
+
+<!-- left: icon row, preview state (demo), command input -->
+<div class="hud left-stack">
+  <div class="icon-row">
+    <div class="ctrl-btn" id="muteBtn" title="Mute">🎙</div>
+    <div class="ctrl-btn" id="interruptBtn" title="Interrupt">⏹</div>
+    <div class="ctrl-btn" id="settingsBtn" title="Settings">⚙</div>
+  </div>
+
+  <div class="panel demo-panel">
+    <div class="hdr">PREVIEW STATE</div>
+    <button class="state-btn active" data-state="listening">● Listening</button>
+    <button class="state-btn" data-state="thinking">● Thinking</button>
+    <button class="state-btn" data-state="speaking">● Speaking</button>
+    <button class="state-btn" data-state="muted">● Muted</button>
+    <button class="state-btn" data-state="sleeping">● Sleeping</button>
+  </div>
+
+  <div class="panel cmd-input">
+    <div class="hdr">■ COMMAND INPUT</div>
+    <div class="field">
+      <span class="prompt">&gt;</span>
+      <input id="cmdField" type="text" placeholder="type or speak a command" />
+      <span class="cursor"></span>
+    </div>
+    <div class="fileup" id="fileUpload"><span class="ic">⇪</span> <span id="fileUploadLabel">DRAG FILE OR CLICK TO UPLOAD</span></div>
+  </div>
+</div>
+
+<div class="hud toast-layer" id="toastLayer"></div>
+
+<!-- Qt's WebChannel bridge transport — injected automatically by
+     QWebEnginePage.setWebChannel() on the Python side; must load before
+     the module script below since it defines window.QWebChannel. -->
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<!-- Content display panel — populated by LiteUI.show_content() -->
+<div class="hud content-panel" id="contentPanel">
+  <div class="cp-inner panel">
+    <div class="hdr"><span id="contentTitle">CONTENT</span><span class="cp-close" id="contentClose">✕</span></div>
+    <div class="cp-body" id="contentBody"></div>
+  </div>
+</div>
+
+<!-- Camera preview overlay — populated by LiteUI.show_camera_frame() -->
+<div class="hud camera-panel" id="cameraPanel">
+  <img id="cameraImg" alt="camera preview" />
+</div>
+
+<!-- Remote control — QR code for phone pairing -->
+<div class="hud remote-panel" id="remotePanel">
+  <div class="remote-inner panel">
+    <div class="hdr">📱 REMOTE CONTROL <span class="cp-close" id="remoteClose">✕</span></div>
+    <div class="remote-body">
+      <img id="remoteQr" alt="QR code" />
+      <div id="remoteNoQr" class="remote-noqr" style="display:none;">
+        QR image unavailable — install with:<br><b style="color:var(--pri)">pip install qrcode[pil]</b><br>Use the link below instead.
+      </div>
+      <p class="remote-hint">Scan with your phone's camera (same Wi-Fi network)</p>
+      <div class="remote-manual"><b>URL</b><br><span id="remoteManualUrl"></span></div>
+      <div class="remote-manual"><b>KEY</b><br><span id="remoteKey"></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Setup / reconfigure modal -->
+<div class="hud setup-modal" id="setupModal">
+  <div class="setup-box panel">
+    <div class="hdr">
+      <span id="setupBackBtn" class="setup-back hidden">← BACK</span>
+      <span id="setupTitle">◈ L.I.T.E. SETTINGS</span>
+      <span style="width:34px;"></span>
+    </div>
+    <div class="setup-body">
+
+      <!-- ═══ MAIN MENU ═══ -->
+      <div class="setup-page" id="page-main">
+        <p class="setup-note">Everything here is optional and can be changed anytime. Voice needs a Gemini key — everything else works without one.</p>
+        <button class="menu-btn" data-page="page-api">🔑 API &amp; PROVIDER SETTINGS</button>
+        <button class="menu-btn" data-page="page-assistant">🎭 CUSTOMISE ASSISTANT</button>
+        <button class="menu-btn" data-page="page-behaviour">☀ BEHAVIOUR</button>
+        <button class="menu-btn" data-page="page-system">⚙ SYSTEM</button>
+        <button class="menu-btn" data-page="page-remote">📱 REMOTE CONTROL</button>
+      </div>
+
+      <!-- ═══ API & PROVIDERS ═══ -->
+      <div class="setup-page hidden" id="page-api">
+        <label>Operating System</label>
+        <select id="setupOs">
+          <option value="windows">Windows</option>
+          <option value="mac">macOS</option>
+          <option value="linux">Linux</option>
+        </select>
+
+        <label>Gemini API key <span class="dim">(voice engine)</span></label>
+        <input id="setupGemini" type="password" placeholder="AIza… (optional)" />
+
+        <label>Claude API key <span class="dim">(fallback)</span></label>
+        <input id="setupClaude" type="password" placeholder="sk-ant-… (optional)" />
+
+        <label>Groq API key <span class="dim">(fallback)</span></label>
+        <input id="setupGroq" type="password" placeholder="gsk_… (optional)" />
+
+        <label>Custom / local endpoint <span class="dim">(fallback, e.g. NVIDIA server)</span></label>
+        <input id="setupCustomUrl" type="text" placeholder="http://localhost:8000 (optional)" />
+
+        <button id="setupSubmit" class="setup-submit">▸ SAVE</button>
+      </div>
+
+      <!-- ═══ ASSISTANT ═══ -->
+      <div class="setup-page hidden" id="page-assistant">
+        <label>Assistant name</label>
+        <input id="setupAsstName" type="text" placeholder="LITE" />
+
+        <label>Your name <span class="dim">(how it addresses you)</span></label>
+        <input id="setupUserName" type="text" placeholder="sir" />
+
+        <label>Accent colour</label>
+        <div class="color-row">
+          <input id="setupColor" type="color" value="#00ff41" />
+          <span class="dim" id="setupColorHex">#00ff41</span>
+        </div>
+
+        <button id="setupCustomizeSubmit" class="setup-submit">▸ SAVE</button>
+      </div>
+
+      <!-- ═══ BEHAVIOUR ═══ -->
+      <div class="setup-page hidden" id="page-behaviour">
+        <button id="briefToggleBtn" class="toggle-btn">☀ MORNING BRIEF: —</button>
+      </div>
+
+      <!-- ═══ SYSTEM ═══ -->
+      <div class="setup-page hidden" id="page-system">
+        <button id="autostartToggleBtn" class="toggle-btn">◉ AUTO-START: —</button>
+        <button id="shortcutBtn" class="toggle-btn">⊞ CREATE DESKTOP SHORTCUT</button>
+        <button id="fullscreenBtn" class="toggle-btn">⛶ TOGGLE FULLSCREEN [F11]</button>
+      </div>
+
+      <!-- ═══ REMOTE ═══ -->
+      <div class="setup-page hidden" id="page-remote">
+        <p class="setup-note">Generates a QR code / link to control LITE from your phone, over your local network.</p>
+        <button id="remoteBtn" class="toggle-btn">◉ CONNECT PHONE / REMOTE CONTROL</button>
+      </div>
+
+      <button id="setupClose" class="setup-close-btn">✕ CLOSE</button>
+    </div>
+  </div>
+</div>
+
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "three/addons/": "./vendor/three/examples/jsm/"
+  }
+}
+</script>
+<!-- Three.js is vendored locally (hologram/vendor/three/) rather than loaded
+     from a CDN — the HUD renders with zero external network dependency.
+     To upgrade the version, replace the files under vendor/three/ with a
+     newer three.js release's build/three.module.js and the same addon
+     files (see the paths above). -->
+
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ---------- palette (matrix-green theme, mirrors ui.py's C class direction) ----------
+const PALETTE = {
+  listening: 0x00ff41,
+  thinking:  0xffcc00,
+  speaking:  0x39ff14,
+  muted:     0xff3355,
+  sleeping:  0x4a6a5a,
+};
+let state = 'listening';
+let stateColor = new THREE.Color(PALETTE.listening);
+let targetColor = new THREE.Color(PALETTE.listening);
+
+// ---------- renderer / scene / camera ----------
+const container = document.getElementById('scene');
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x00060a, 0.045);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 1.6, 7.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+container.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 4;
+controls.maxDistance = 14;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.6;
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.15, 0.6, 0.15);
+composer.addPass(bloom);
+
+// ---------- the core ----------
+const coreGroup = new THREE.Group();
+scene.add(coreGroup);
+
+const glowGeo = new THREE.IcosahedronGeometry(0.9, 2);
+const glowMat = new THREE.MeshBasicMaterial({ color: stateColor, transparent:true, opacity:0.14 });
+const glowSphere = new THREE.Mesh(glowGeo, glowMat);
+coreGroup.add(glowSphere);
+
+const coreGeo = new THREE.IcosahedronGeometry(1.7, 1);
+const coreEdges = new THREE.EdgesGeometry(coreGeo);
+const coreMat = new THREE.LineBasicMaterial({ color: stateColor, transparent:true, opacity:0.85 });
+const coreWire = new THREE.LineSegments(coreEdges, coreMat);
+coreGroup.add(coreWire);
+
+const shell2Geo = new THREE.IcosahedronGeometry(2.3, 0);
+const shell2Edges = new THREE.EdgesGeometry(shell2Geo);
+const shell2Mat = new THREE.LineBasicMaterial({ color: stateColor, transparent:true, opacity:0.25 });
+const shell2Wire = new THREE.LineSegments(shell2Edges, shell2Mat);
+coreGroup.add(shell2Wire);
+
+// ---------- orbiting module particles ----------
+const NUM_ORBITS = 3;
+const orbitGroups = [];
+for(let o=0; o<NUM_ORBITS; o++){
+  const g = new THREE.Group();
+  g.rotation.x = (Math.PI/2) * (o/NUM_ORBITS) + 0.3*o;
+  g.rotation.z = o * 0.7;
+  scene.add(g);
+  orbitGroups.push(g);
+
+  const ringGeo = new THREE.TorusGeometry(3.1 + o*0.55, 0.006, 8, 128);
+  const ringMat = new THREE.MeshBasicMaterial({ color: stateColor, transparent:true, opacity:0.18 });
+  g.add(new THREE.Mesh(ringGeo, ringMat));
+
+  const count = 5 + o*2;
+  const dotGeo = new THREE.SphereGeometry(0.05, 8, 8);
+  for(let i=0;i<count;i++){
+    const dotMat = new THREE.MeshBasicMaterial({ color: stateColor });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    const angle = (i/count) * Math.PI*2;
+    const r = 3.1 + o*0.55;
+    dot.position.set(Math.cos(angle)*r, 0, Math.sin(angle)*r);
+    dot.userData = { angle, r, speed: 0.15 + o*0.08 + i*0.002 };
+    g.add(dot);
+  }
+}
+
+// ---------- particle dust field ----------
+const dustCount = 400;
+const dustGeo = new THREE.BufferGeometry();
+const dustPos = new Float32Array(dustCount*3);
+for(let i=0;i<dustCount;i++){
+  const r = 5 + Math.random()*10;
+  const theta = Math.random()*Math.PI*2;
+  const phi = Math.acos((Math.random()*2)-1);
+  dustPos[i*3]   = r*Math.sin(phi)*Math.cos(theta);
+  dustPos[i*3+1] = r*Math.cos(phi)*0.4;
+  dustPos[i*3+2] = r*Math.sin(phi)*Math.sin(theta);
+}
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+const dustMat = new THREE.PointsMaterial({ color: 0x00ff41, size:0.025, transparent:true, opacity:0.35 });
+const dust = new THREE.Points(dustGeo, dustMat);
+scene.add(dust);
+
+// ---------- ground grid + radar pulse rings ----------
+const grid = new THREE.GridHelper(20, 40, 0x0c2d1a, 0x0c2d1a);
+grid.position.y = -2.4;
+grid.material.transparent = true;
+grid.material.opacity = 0.35;
+scene.add(grid);
+
+const pulseRings = [];
+for(let i=0;i<3;i++){
+  const geo = new THREE.RingGeometry(1, 1.02, 64);
+  const mat = new THREE.MeshBasicMaterial({ color: stateColor, transparent:true, opacity:0, side:THREE.DoubleSide });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = -Math.PI/2;
+  ring.position.y = -2.39;
+  scene.add(ring);
+  pulseRings.push({ mesh:ring, phase: i/3 });
+}
+
+// ---------- lighting ----------
+scene.add(new THREE.AmbientLight(0x0a2515, 1.2));
+const pointLight = new THREE.PointLight(stateColor, 3, 12);
+pointLight.position.set(0,0,0);
+scene.add(pointLight);
+
+// ---------- waveform bars ----------
+const waveformEl = document.getElementById('waveform');
+const BAR_COUNT = 26;
+for(let i=0;i<BAR_COUNT;i++){
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  const h = 6 + Math.round(Math.abs(Math.sin(i*0.5))*24);
+  bar.style.height = h + 'px';
+  bar.style.animationDelay = (i*0.045) + 's';
+  bar.style.animationDuration = (0.8 + Math.random()*0.6) + 's';
+  waveformEl.appendChild(bar);
+}
+
+// ---------- log (real lines pushed from Python via write_log) ----------
+const logLinesEl = document.getElementById('logLines');
+function pushLog(text){
+  const line = document.createElement('div');
+  line.className = 'line';
+  const t = new Date().toTimeString().slice(0,8);
+  line.innerHTML = `<span class="t">${t}</span>${escapeHtml(text)}`;
+  logLinesEl.prepend(line);
+  while(logLinesEl.children.length > 8) logLinesEl.removeChild(logLinesEl.lastChild);
+}
+function escapeHtml(s){
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ---------- weather (real data pushed from Python, shaped exactly like
+// actions/weather_api.get_weather_for_city()) ----------
+function renderWeather(data){
+  document.getElementById('wxCity').textContent =
+    `${data.city.toUpperCase()}${data.region ? ', '+data.region : ''} (${data.country})`;
+  document.getElementById('wxIcon').textContent = data.current.icon;
+  document.getElementById('wxTemp').textContent =
+    (data.current.temp_c != null ? Math.round(data.current.temp_c) + '°C' : '—');
+  document.getElementById('wxCond').textContent = data.current.description;
+  document.getElementById('wxWind').textContent =
+    (data.current.wind_kph != null ? `Wind: ${Math.round(data.current.wind_kph)} km/h` : '');
+
+  const row = document.getElementById('wxForecast');
+  row.innerHTML = '';
+  const dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  (data.forecast || []).slice(0,5).forEach(f=>{
+    const d = new Date(f.date + 'T00:00:00');
+    const el = document.createElement('div');
+    el.className = 'fc-day';
+    const hi = f.temp_max_c != null ? Math.round(f.temp_max_c) + '°' : '—';
+    const lo = f.temp_min_c != null ? Math.round(f.temp_min_c) + '°' : '—';
+    el.innerHTML = `
+      <div class="d">${dayNames[d.getDay()]}</div>
+      <div class="i">${f.icon}</div>
+      <div class="hl"><b>${hi}</b>/${lo}</div>`;
+    row.appendChild(el);
+  });
+  currentWeatherCity = data.city;
+}
+let currentWeatherCity = 'Lagos';
+document.getElementById('wxRefresh').addEventListener('click', ()=>{
+  pushLog('Refreshing weather...');
+  if(window.pybridge) window.pybridge.requestWeather(currentWeatherCity);
+});
+
+// ---------- live clock ----------
+function tickClock(){
+  const now = new Date();
+  document.getElementById('clockTime').textContent =
+    now.toTimeString().slice(0,8);
+  const days = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+  const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  document.getElementById('clockDate').textContent =
+    `${days[now.getDay()]} ${String(now.getDate()).padStart(2,'0')} ${months[now.getMonth()]} ${now.getFullYear()}`;
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+// ---------- transient toasts (system alerts / news — pushed from Python,
+// never occupy permanent space) — draggable to reposition, auto-dismiss
+// pauses while hovered/dragged so there's time to read long content ----------
+const toastLayer = document.getElementById('toastLayer');
+let toastStackOffset = 0;
+
+function showToast(kicker, text){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `
+    <div class="k"><span>${escapeHtml(kicker)}</span><span class="drag-hint">⠿ drag to move · scroll for more</span></div>
+    <div class="v">${escapeHtml(text)}</div>`;
+
+  // Spawn near center, cascading slightly so multiple toasts don't stack exactly on top of each other.
+  const startX = innerWidth/2 - 160 + (toastStackOffset % 4) * 18;
+  const startY = innerHeight/2 - 40 + (toastStackOffset % 4) * 18;
+  toastStackOffset++;
+  el.style.left = startX + 'px';
+  el.style.top  = startY + 'px';
+  toastLayer.appendChild(el);
+
+  const DISMISS_MS = 3800;
+  let dismissTimer = null;
+  let dragging = false, dragDX = 0, dragDY = 0;
+  let removed = false;
+
+  function scheduleDismiss(ms){
+    clearTimeout(dismissTimer);
+    dismissTimer = setTimeout(()=>{
+      el.classList.add('dismissing');
+      setTimeout(cleanup, 380);
+    }, ms);
+  }
+  function pauseDismiss(){ clearTimeout(dismissTimer); }
+  function resumeDismiss(){ scheduleDismiss(2200); } // shorter grace period after interaction
+
+  el.addEventListener('mouseenter', pauseDismiss);
+  el.addEventListener('mouseleave', ()=>{ if(!dragging) resumeDismiss(); });
+
+  function dragStart(clientX, clientY){
+    dragging = true;
+    pauseDismiss();
+    el.classList.add('dragging');
+    const rect = el.getBoundingClientRect();
+    dragDX = clientX - rect.left;
+    dragDY = clientY - rect.top;
+  }
+  function dragMove(clientX, clientY){
+    if(!dragging) return;
+    let x = clientX - dragDX, y = clientY - dragDY;
+    x = Math.max(4, Math.min(innerWidth  - el.offsetWidth  - 4, x));
+    y = Math.max(4, Math.min(innerHeight - el.offsetHeight - 4, y));
+    el.style.left = x + 'px';
+    el.style.top  = y + 'px';
+  }
+  function dragEnd(){
+    if(!dragging) return;
+    dragging = false;
+    el.classList.remove('dragging');
+    resumeDismiss();
+  }
+  const onMouseMove  = (e)=> dragMove(e.clientX, e.clientY);
+  const onMouseUp    = dragEnd;
+  const onTouchMove  = (e)=>{ if(dragging){ const t = e.touches[0]; dragMove(t.clientX, t.clientY); } };
+  const onTouchEnd   = dragEnd;
+
+  // Every toast added its own window-level listeners here and never removed
+  // them — over a long session (system alerts, news updates) these piled up
+  // unbounded, one full set per toast that had ever appeared, which is
+  // exactly the kind of thing that makes dragging feel progressively
+  // janky the longer the app has been running. cleanup() below removes
+  // this toast's set the moment it's actually gone.
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('touchmove', onTouchMove, { passive:true });
+  window.addEventListener('touchend', onTouchEnd);
+
+  function cleanup(){
+    if(removed) return;
+    removed = true;
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('touchmove', onTouchMove);
+    window.removeEventListener('touchend', onTouchEnd);
+    el.remove();
+  }
+
+  el.addEventListener('mousedown', (e)=>{ dragStart(e.clientX, e.clientY); e.preventDefault(); });
+  el.addEventListener('touchstart', (e)=>{
+    const t = e.touches[0]; dragStart(t.clientX, t.clientY);
+  }, { passive:true });
+
+  scheduleDismiss(DISMISS_MS);
+}
+
+// ---------- command input ----------
+const cmdField = document.getElementById('cmdField');
+cmdField.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter' && cmdField.value.trim()){
+    const text = cmdField.value.trim();
+    pushLog('You: ' + text);
+    if(window.pybridge) window.pybridge.sendTextCommand(text);
+    cmdField.value = '';
+  }
+});
+
+// ---------- file upload ----------
+document.getElementById('fileUpload').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestFileUpload();
+});
+
+// ---------- settings modal: two-level navigation (main menu -> sub-page) ----------
+const SETUP_TITLES = {
+  'page-main':       '◈ L.I.T.E. SETTINGS',
+  'page-api':        'API & PROVIDERS',
+  'page-assistant':  'CUSTOMISE ASSISTANT',
+  'page-behaviour':  'BEHAVIOUR',
+  'page-system':     'SYSTEM',
+  'page-remote':     'REMOTE CONTROL',
+};
+function showSetupPage(pageId){
+  document.querySelectorAll('.setup-page').forEach(p => p.classList.add('hidden'));
+  document.getElementById(pageId).classList.remove('hidden');
+  document.getElementById('setupTitle').textContent = SETUP_TITLES[pageId] || 'SETTINGS';
+  document.getElementById('setupBackBtn').classList.toggle('hidden', pageId === 'page-main');
+  const box = document.querySelector('.setup-box');
+  if(box) box.scrollTop = 0;
+}
+document.querySelectorAll('.menu-btn[data-page]').forEach(btn=>{
+  btn.addEventListener('click', ()=> showSetupPage(btn.dataset.page));
+});
+document.getElementById('setupBackBtn').addEventListener('click', ()=> showSetupPage('page-main'));
+
+// ---------- interrupt / mute / settings ----------
+document.getElementById('interruptBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestInterrupt();
+});
+document.getElementById('settingsBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestSettingsOpen();
+  showSetupPage('page-main');
+  document.getElementById('setupModal').classList.add('visible');
+});
+
+// ---------- content panel ----------
+document.getElementById('contentClose').addEventListener('click', ()=>{
+  document.getElementById('contentPanel').classList.remove('visible');
+});
+
+// ---------- remote control panel ----------
+document.getElementById('remoteClose').addEventListener('click', ()=>{
+  document.getElementById('remotePanel').classList.remove('visible');
+});
+
+// ---------- setup modal: API & providers ----------
+document.getElementById('setupSubmit').addEventListener('click', ()=>{
+  const cfg = {
+    os_system:       document.getElementById('setupOs').value,
+    gemini_api_key:  document.getElementById('setupGemini').value.trim(),
+    anthropic_api_key: document.getElementById('setupClaude').value.trim(),
+    groq_api_key:    document.getElementById('setupGroq').value.trim(),
+    fallback_api_url: document.getElementById('setupCustomUrl').value.trim(),
+  };
+  if(window.pybridge) window.pybridge.submitSetup(JSON.stringify(cfg));
+  pushLog('Settings: API & provider settings saved.');
+  showSetupPage('page-main');
+});
+
+// ---------- setup modal: assistant customisation (name + live accent colour) ----------
+function hexToRgb(hex){
+  const v = hex.replace('#','');
+  return { r: parseInt(v.slice(0,2),16), g: parseInt(v.slice(2,4),16), b: parseInt(v.slice(4,6),16) };
+}
+function shade(hex, factor){ // factor<1 darkens
+  const {r,g,b} = hexToRgb(hex);
+  const c = v => Math.max(0, Math.min(255, Math.round(v*factor)));
+  return `#${[c(r),c(g),c(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}`;
+}
+function applyAccentColor(hex, persist){
+  const {r,g,b} = hexToRgb(hex);
+  rootStyle.setProperty('--pri', hex);
+  rootStyle.setProperty('--pri-dim', shade(hex, 0.62));
+  rootStyle.setProperty('--pri-ghost', `rgba(${r},${g},${b},0.08)`);
+  PALETTE.listening = parseInt(hex.replace('#','0x'), 16);
+  document.getElementById('setupColorHex').textContent = hex;
+  if(state === 'listening'){ targetColor = new THREE.Color(PALETTE.listening); }
+}
+document.getElementById('setupColor').addEventListener('input', (e)=>{
+  applyAccentColor(e.target.value);
+});
+document.getElementById('setupCustomizeSubmit').addEventListener('click', ()=>{
+  const payload = {
+    assistant_name: document.getElementById('setupAsstName').value.trim(),
+    user_name:      document.getElementById('setupUserName').value.trim(),
+    ui_color:       document.getElementById('setupColor').value,
+  };
+  applyAccentColor(payload.ui_color);
+  if(window.pybridge) window.pybridge.submitCustomize(JSON.stringify(payload));
+  pushLog('Settings: assistant settings saved.');
+  showSetupPage('page-main');
+});
+
+// ---------- setup modal: behaviour / system / remote ----------
+document.getElementById('briefToggleBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestToggleBrief();
+});
+document.getElementById('autostartToggleBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestToggleAutostart();
+});
+document.getElementById('shortcutBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestCreateShortcut();
+});
+document.getElementById('fullscreenBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestToggleFullscreen();
+});
+document.getElementById('remoteBtn').addEventListener('click', ()=>{
+  pushLog('Requesting remote control link...');
+  document.getElementById('setupModal').classList.remove('visible');   // close so the result panel isn't hidden behind it
+  if(window.pybridge){
+    window.pybridge.requestRemoteConnect();
+  } else {
+    pushLog('ERR: bridge unavailable — cannot request remote link.');
+  }
+});
+document.getElementById('setupClose').addEventListener('click', ()=>{
+  document.getElementById('setupModal').classList.remove('visible');
+});
+
+// ---------- state switching (driven by Python via onState) ----------
+const statusEl = document.getElementById('statusText');
+const rootStyle = document.documentElement.style;
+const muteBtn = document.getElementById('muteBtn');
+
+// ---------- audio cues — procedurally synthesized, no bundled sound files ----------
+// (consistent with vendoring Three.js locally instead of a CDN: nothing here
+// depends on an external asset that could go missing or need licensing)
+let audioCtx = null;
+function getAudioCtx(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ return null; }
+  }
+  return audioCtx;
+}
+function beep(freq, startTime, duration, gain, type='sine'){
+  const ctx = getAudioCtx();
+  if(!ctx) return;
+  if(ctx.state === 'suspended') ctx.resume().catch(()=>{});
+  const osc  = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, startTime);
+  gainNode.gain.setValueAtTime(0, startTime);
+  gainNode.gain.linearRampToValueAtTime(gain, startTime + 0.015);
+  gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  osc.connect(gainNode).connect(ctx.destination);
+  osc.start(startTime);
+  osc.stop(startTime + duration + 0.02);
+}
+function playThinkingSound(){
+  const ctx = getAudioCtx();
+  if(!ctx) return;
+  const t = ctx.currentTime;
+  beep(420, t,        0.09, 0.05, 'sine');
+  beep(560, t + 0.10,  0.09, 0.04, 'sine');
+}
+function playCompleteSound(){
+  const ctx = getAudioCtx();
+  if(!ctx) return;
+  const t = ctx.currentTime;
+  beep(660, t,        0.08, 0.055, 'sine');
+  beep(880, t + 0.09,  0.14, 0.055, 'sine');
+}
+
+// ---------- simulated progress readout during "thinking" ----------
+// Honest about what this is: an illustrative sense of "still working", not
+// real task-completion telemetry (the backend doesn't report granular
+// progress for arbitrary tool calls). Eases toward ~90% and never
+// self-reports 100% — only the real state change away from "thinking"
+// (an actual completion signal) triggers the snap-to-100% + fade.
+let thinkStartTime = 0;
+let thinkRAF = null;
+function tickThinkProgress(){
+  const elapsed = (Date.now() - thinkStartTime) / 1000;
+  const pct = Math.min(90, Math.round(90 * (1 - Math.exp(-elapsed / 2.2))));
+  statusEl.textContent = `THINKING — ${pct}%`;
+  thinkRAF = requestAnimationFrame(tickThinkProgress);
+}
+function startThinkProgress(){
+  thinkStartTime = Date.now();
+  cancelAnimationFrame(thinkRAF);
+  tickThinkProgress();
+}
+function stopThinkProgress(completed){
+  cancelAnimationFrame(thinkRAF);
+  thinkRAF = null;
+  if(completed){
+    statusEl.textContent = 'THINKING — 100%';
+    setTimeout(()=>{ if(state !== 'thinking') statusEl.textContent = state.toUpperCase(); }, 260);
+  }
+}
+
+function setState(next){
+  next = (next || 'listening').toLowerCase();
+  const wasThinking = (state === 'thinking');   // read BEFORE reassigning `state` below
+  const enteringThinking = (next === 'thinking' && !wasThinking);
+  const leavingThinking  = (next !== 'thinking' && wasThinking);
+
+  state = next;
+  targetColor = new THREE.Color(PALETTE[next] || PALETTE.listening);
+  rootStyle.setProperty('--state-color', '#'+targetColor.getHexString());
+  muteBtn.classList.toggle('active', next === 'muted');
+  document.querySelectorAll('.state-btn[data-state]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.state === next);
+  });
+  controls.autoRotateSpeed = next === 'thinking' ? 1.4 : next === 'sleeping' ? 0.15 : 0.6;
+
+  if(enteringThinking){
+    playThinkingSound();
+    startThinkProgress();
+  } else if(leavingThinking){
+    playCompleteSound();
+    stopThinkProgress(true);
+  } else if(next !== 'thinking'){
+    statusEl.textContent = next.toUpperCase();
+  }
+}
+muteBtn.addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestMuteToggle();
+});
+
+// PREVIEW STATE — local visual override for eyeballing how each state
+// looks; the next real push from Python will naturally take over again.
+document.querySelectorAll('.state-btn[data-state]').forEach(btn=>{
+  btn.addEventListener('click', ()=> setState(btn.dataset.state));
+});
+
+// ---------- QWebChannel bridge — Python <-> JS ----------
+function initBridge(){
+  new QWebChannel(qt.webChannelTransport, function(channel){
+    window.pybridge = channel.objects.pybridge;
+
+    window.LiteHud = {
+      onLog:      (text)   => pushLog(text),
+      onState:    (s)      => setState(s),
+      onMuted:    (muted)  => muteBtn.classList.toggle('active', muted),
+      onWeather:  (dataJson) => { try{ renderWeather(JSON.parse(dataJson)); }catch(e){} },
+      onWeatherHide: ()    => {},
+      onToast:    (kicker, text) => showToast(kicker, text),
+      onContent:  (title, text) => {
+        document.getElementById('contentTitle').textContent = title || 'CONTENT';
+        document.getElementById('contentBody').textContent = text || '';
+        document.getElementById('contentPanel').classList.add('visible');
+      },
+      onCameraFrame: (base64) => {
+        const img = document.getElementById('cameraImg');
+        img.src = 'data:image/jpeg;base64,' + base64;
+      },
+      onCameraStreamStart: () => document.getElementById('cameraPanel').classList.add('visible'),
+      onCameraStreamStop:  () => document.getElementById('cameraPanel').classList.remove('visible'),
+      onFileSelected: (name) => {
+        document.getElementById('fileUploadLabel').textContent = name || 'DRAG FILE OR CLICK TO UPLOAD';
+      },
+      onRemoteInfo: (dataJson) => {
+        try{
+          const d = JSON.parse(dataJson || '{}');
+          const img = document.getElementById('remoteQr');
+          const noQr = document.getElementById('remoteNoQr');
+          if(d.qr){
+            img.src = 'data:image/png;base64,' + d.qr;
+            img.style.display = 'inline-block';
+            noQr.style.display = 'none';
+          } else {
+            img.style.display = 'none';
+            noQr.style.display = 'block';
+          }
+          document.getElementById('remoteManualUrl').textContent = d.manual || d.auto_login_url || '';
+          document.getElementById('remoteKey').textContent = d.key || '';
+          document.getElementById('remotePanel').classList.add('visible');
+        }catch(e){
+          pushLog('ERR: failed to render remote control info.');
+        }
+      },
+      onAssistantName: (name) => {
+        document.getElementById('brandMark').textContent = (name || 'LITE').toUpperCase();
+      },
+      onSetupNeeded: (currentJson) => {
+        try{
+          const cur = JSON.parse(currentJson || '{}');
+          if(cur.os_system)       document.getElementById('setupOs').value = cur.os_system;
+          if(cur.assistant_name)  document.getElementById('setupAsstName').value = cur.assistant_name;
+          if(cur.user_name)       document.getElementById('setupUserName').value = cur.user_name;
+          if(cur.ui_color){
+            document.getElementById('setupColor').value = cur.ui_color;
+            applyAccentColor(cur.ui_color);
+          }
+          const briefBtn = document.getElementById('briefToggleBtn');
+          briefBtn.textContent = `☀ MORNING BRIEF: ${cur.brief_enabled ? 'ON' : 'OFF'}`;
+          briefBtn.classList.toggle('on', !!cur.brief_enabled);
+          const autoBtn = document.getElementById('autostartToggleBtn');
+          autoBtn.textContent = `◉ AUTO-START: ${cur.autostart_enabled ? 'ON' : 'OFF'}`;
+          autoBtn.classList.toggle('on', !!cur.autostart_enabled);
+        }catch(e){}
+        document.getElementById('setupModal').classList.add('visible');
+      },
+      onSettingsState: (payload) => {
+        // Same shape as onSetupNeeded's prefill, pushed after a toggle action
+        // so the button reflects the new state immediately.
+        try{
+          const cur = JSON.parse(payload || '{}');
+          if('brief_enabled' in cur){
+            const briefBtn = document.getElementById('briefToggleBtn');
+            briefBtn.textContent = `☀ MORNING BRIEF: ${cur.brief_enabled ? 'ON' : 'OFF'}`;
+            briefBtn.classList.toggle('on', !!cur.brief_enabled);
+          }
+          if('autostart_enabled' in cur){
+            const autoBtn = document.getElementById('autostartToggleBtn');
+            autoBtn.textContent = `◉ AUTO-START: ${cur.autostart_enabled ? 'ON' : 'OFF'}`;
+            autoBtn.classList.toggle('on', !!cur.autostart_enabled);
+          }
+        }catch(e){}
+      },
+      onReady: () => {
+        document.getElementById('setupModal').classList.remove('visible');
+      },
+    };
+
+    if(window.pybridge.notifyHudReady) window.pybridge.notifyHudReady();
+  });
+}
+if(window.qt && window.qt.webChannelTransport){
+  initBridge();
+} else {
+  // Fallback for viewing this file directly in a plain browser (no Qt bridge) —
+  // the HUD still renders and animates, just without a live backend.
+  window.pybridge = null;
+}
+
+
+// ---------- animation loop ----------
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  stateColor.lerp(targetColor, dt*3.5);
+  [coreMat, shell2Mat].forEach(m => m.color.copy(stateColor));
+  glowMat.color.copy(stateColor);
+  pointLight.color.copy(stateColor);
+  dustMat.color.copy(stateColor);
+  pulseRings.forEach(p => p.mesh.material.color.copy(stateColor));
+  orbitGroups.forEach(g => g.children.forEach(c => {
+    if(c.material && c.material.color) c.material.color.copy(stateColor);
+  }));
+
+  const pulseSpeed = state==='thinking' ? 5.5 : state==='sleeping' ? 0.7 : 1.8;
+  const pulse = 0.14 + Math.sin(t*pulseSpeed)*0.05 + (state==='speaking' ? Math.random()*0.06 : 0);
+  glowMat.opacity = Math.max(0.05, pulse);
+  glowSphere.scale.setScalar(1 + Math.sin(t*pulseSpeed)*0.05);
+
+  coreWire.rotation.y += dt * (state==='thinking' ? 0.6 : 0.18);
+  coreWire.rotation.x += dt * 0.05;
+  shell2Wire.rotation.y -= dt * (state==='thinking' ? 0.35 : 0.1);
+
+  orbitGroups.forEach(g=>{
+    g.children.forEach(c=>{
+      if(c.userData.angle === undefined) return;
+      c.userData.angle += dt * c.userData.speed * (state==='sleeping' ? 0.2 : 1);
+      c.position.x = Math.cos(c.userData.angle) * c.userData.r;
+      c.position.z = Math.sin(c.userData.angle) * c.userData.r;
+    });
+  });
+
+  dust.rotation.y += dt * 0.01;
+
+  pulseRings.forEach(p=>{
+    const local = (t*0.25 + p.phase) % 1;
+    const scale = 1 + local*14;
+    p.mesh.scale.set(scale, scale, 1);
+    p.mesh.material.opacity = Math.max(0, 0.35 * (1-local));
+  });
+
+  controls.update();
+  composer.render();
+}
+animate();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+
+</body>
+</html>

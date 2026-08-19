@@ -1,0 +1,30 @@
+{
+  "_comment": "Copy this file to api_keys.json (same folder) and fill in what you use. api_keys.json itself is gitignored and never gets committed — everything below stays local to your machine.",
+
+  "os_system": "windows",
+
+  "_comment_gemini": "Primary voice + reasoning engine. Optional — everything except live voice works without it.",
+  "gemini_api_key": "",
+
+  "_comment_fallback": "Used automatically if Gemini fails or its quota is exhausted, for text-based tools (code_helper, dev_agent, self_maintain, search summaries, etc). Tried in this order: Claude, then Groq, then a custom/local endpoint — configure any/all.",
+  "anthropic_api_key": "",
+  "anthropic_model": "claude-sonnet-4-5",
+  "groq_api_key": "",
+  "groq_model": "llama-3.3-70b-versatile",
+  "fallback_api_url": "",
+  "fallback_api_key": "",
+  "fallback_model": "",
+
+  "_comment_search": "Powers web search / news summaries. DuckDuckGo is always used as the no-key baseline regardless of this setting.",
+  "search_provider": "gemini",
+  "search_api_url": "",
+  "search_api_key": "",
+  "search_model": "",
+
+  "_comment_github": "Only needed for self_update's clone mode against a private repo when no interactive git credential prompt is available.",
+  "github_repo_url": "",
+  "github_token": "",
+
+  "_comment_hotkey": "System-wide mute toggle (works even when LITE's window isn't focused). pynput format — see https://pynput.readthedocs.io/en/latest/keyboard.html#global-hotkeys",
+  "mute_hotkey": "<ctrl>+<alt>+m"
+}
