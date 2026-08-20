@@ -34,6 +34,7 @@ if _platform.system() == "Windows":
 # ─────────────────────────────────────────────────────────────────────────────
 
 import asyncio
+import base64
 import re
 import threading
 import time
@@ -44,6 +45,7 @@ from datetime import datetime
 from pathlib import Path
 
 import sounddevice as sd
+import numpy as np
 from google import genai
 from google.genai import types
 from ui import LiteUI
@@ -69,6 +71,7 @@ from actions.code_helper       import code_helper
 from actions.dev_agent          import dev_agent
 from actions.self_maintain      import self_maintain
 from actions.self_update        import self_update
+from actions.affiliate_growth_agent import affiliate_growth_agent
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
@@ -444,6 +447,56 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "affiliate_growth_agent",
+        "description": (
+            "Autonomous Affiliate Marketing Social Media Growth subagent "
+            "reporting to LITE. Ranks affiliate offers, researches "
+            "audiences, builds social growth strategies and content "
+            "calendars, writes posts/reels/video scripts/email sequences/"
+            "ad copy/landing page copy, and reviews performance metrics. "
+            "Every response ends with a structured LITE executive summary "
+            "(opportunity, recommended action, expected ROI, risk level, "
+            "priority, next actions). assign_job hands it a standing job "
+            "that keeps running via GAS (the cloud service) even while "
+            "the laptop is off; get_report pulls the latest overnight "
+            "results (drafts written, leads, conversions, earnings). Call "
+            "this whenever the user asks about affiliate marketing, "
+            "content strategy, social growth, wants marketing content "
+            "written, or asks the growth agent for a report."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": (
+                        "rank_offers | research_audience | growth_strategy | "
+                        "content_calendar | post_ideas | video_script | "
+                        "email_sequence | landing_page | ad_copy | "
+                        "performance_review | assign_job | get_report | "
+                        "custom (default: custom)"
+                    ),
+                },
+                "task":          {"type": "STRING",  "description": "Free-form instruction, used when action=custom."},
+                "niche":         {"type": "STRING",  "description": "The affiliate niche, e.g. 'personal finance apps'."},
+                "offers":        {"type": "STRING",  "description": "Affiliate offers to rank (plain text or JSON list)."},
+                "platforms":     {"type": "STRING",  "description": "Comma-separated platforms to prioritise."},
+                "platform":      {"type": "STRING",  "description": "Single platform for post_ideas/video_script/ad_copy."},
+                "budget_notes":  {"type": "STRING",  "description": "Budget/resourcing constraints for growth_strategy."},
+                "weeks":         {"type": "INTEGER", "description": "Length of content_calendar in weeks (default 4)."},
+                "count":         {"type": "INTEGER", "description": "Number of post_ideas to generate (default 10)."},
+                "angle":         {"type": "STRING",  "description": "Creative angle for video_script."},
+                "goal":          {"type": "STRING",  "description": "email_sequence goal, or assign_job's standing goal."},
+                "num_emails":    {"type": "INTEGER", "description": "Number of emails in email_sequence (default 5)."},
+                "offer":         {"type": "STRING",  "description": "The specific offer for landing_page/ad_copy."},
+                "metrics":       {"type": "STRING",  "description": "Performance metrics to review (plain text or JSON)."},
+                "cadence_hours": {"type": "INTEGER", "description": "assign_job: how often GAS runs a content pass (default 6)."},
+                "posts_per_run": {"type": "INTEGER", "description": "assign_job: pieces drafted per pass (default 3)."},
+            },
+            "required": []
+        }
+    },
+    {
         "name": "mute_self",
         "description": (
             "Mutes or unmutes the microphone. Call this when the user says something like "
@@ -680,6 +733,7 @@ class LiteLive:
         self._is_speaking         = False
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
+        self._phone_stt           = None    # lazily-loaded WhisperSTT, shared across fallback-mode phone utterances
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
         self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
@@ -943,6 +997,12 @@ class LiteLive:
                 result = r or "Done."
                 if r:
                     self.ui.show_content("SELF-UPDATE", r)
+
+            elif name == "affiliate_growth_agent":
+                r = await loop.run_in_executor(
+                    None, lambda: affiliate_growth_agent(parameters=args, player=self.ui, speak=self.speak)
+                )
+                result = r or "Done."
 
             elif name == "mute_self":
                 state = (args.get("state") or "").strip().lower()
@@ -1505,24 +1565,137 @@ class LiteLive:
 
     # ── Phone audio relay ────────────────────────────────────────────────────────
 
+    def _get_phone_stt(self):
+        """Lazily load a Whisper STT instance shared across fallback-mode phone
+        utterances. Separate from FallbackVoice's own instance (which handles
+        the local mic) — some duplicate memory if both are active at once,
+        but keeps this change isolated rather than threading a shared
+        instance through two independently-lifecycled subsystems."""
+        if self._phone_stt is None:
+            from core.stt import WhisperSTT
+            try:
+                with open(API_CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+            self._phone_stt = WhisperSTT(model_name=cfg.get("fallback_stt_model", "base"))
+        return self._phone_stt
+
+    async def _synthesize_reply_audio_mp3(self, text: str) -> bytes | None:
+        """Best-effort TTS for phone replies — EdgeTTS returns MP3 bytes
+        directly and is trivially playable via an HTML5 <audio> element,
+        so it's used here regardless of the desktop's configured TTS engine
+        (Kokoro/ElevenLabs return formats that need extra handling this
+        path doesn't need). Returns None on any failure — a missing audio
+        reply should never block delivering the text reply."""
+        if not text.strip():
+            return None
+        try:
+            from core.tts import EdgeTTSEngine
+            return await EdgeTTSEngine()._synth(text)
+        except Exception as e:
+            print(f"[PhoneVoice] TTS synth failed (reply stays text-only): {e}")
+            return None
+
     async def _relay_phone_audio(self) -> None:
-        """Forward phone mic PCM chunks from dashboard queue into the Gemini Live session."""
+        """Consume phone-mic PCM16 chunks from the dashboard queue.
+
+        Always running (started once in run(), independent of whether a
+        Gemini Live session is up) — previously this task only existed
+        inside the Live-session TaskGroup, so phone audio silently went
+        nowhere the moment Live wasn't connected (fallback voice mode, no
+        Gemini key, quota exhausted, or simply before the first connect).
+        Text commands never had this problem because
+        _process_dashboard_commands has always been a top-level task; this
+        gives phone voice the same guarantee.
+
+        Two modes, decided per-chunk:
+          - Gemini Live session active → forward raw PCM straight through,
+            exactly as before (zero behaviour change for the working case).
+          - No Live session → buffer the utterance locally, transcribe with
+            Whisper on a silence gap, and push the text into the same
+            dashboard command queue text commands already use — so it gets
+            a real reply via the existing Gemini-or-fallback text path,
+            visible in the phone's chat log. A best-effort spoken reply is
+            also synthesized and sent back to the phone over the chat
+            websocket, since "nothing audible came back" was as much the
+            complaint as "nothing happened at all".
+        """
         q = self._dashboard._phone_audio_queue
+        SILENCE_GAP_S     = 0.9   # matches core.fallback_voice.SILENCE_MS
+        MAX_UTTERANCE_S   = 20
+        SAMPLE_RATE       = 16000
+        BYTES_PER_SEC     = SAMPLE_RATE * 2   # int16 mono
+
+        buffer = bytearray()
+        buffer_started_at = None
+
+        async def _flush_buffer():
+            nonlocal buffer, buffer_started_at
+            if not buffer:
+                return
+            pcm_bytes = bytes(buffer)
+            buffer = bytearray()
+            buffer_started_at = None
+
+            audio_f32 = (
+                np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            )
+            if len(audio_f32) < SAMPLE_RATE * 0.3:
+                return  # too short to be real speech — drop rather than waste a whisper call
+
+            try:
+                stt = await asyncio.to_thread(self._get_phone_stt)
+                text = await asyncio.to_thread(stt.transcribe, audio_f32)
+            except Exception as e:
+                print(f"[PhoneVoice] Transcription failed: {e}")
+                if self._dashboard:
+                    await self._dashboard.broadcast({
+                        "type": "log", "speaker": "lite",
+                        "text": "Sir, I couldn't transcribe that — offline speech "
+                                 "recognition may not be installed (faster-whisper).",
+                        "ts": datetime.now().isoformat(),
+                    })
+                return
+
+            text = text.strip()
+            if not text:
+                return
+
+            self.ui.write_log(f"[Phone voice]: {text}")
+            # Reuses the exact path text commands already use — Gemini Live if
+            # available (won't be, in this branch, since we only got here
+            # because self.session was None), otherwise the fallback text
+            # provider. Also handles the user-message broadcast for us.
+            self._dashboard._command_queue.put_nowait({"text": text})
+
         while True:
             try:
-                chunk = await asyncio.wait_for(q.get(), timeout=1.0)
+                item = await asyncio.wait_for(q.get(), timeout=SILENCE_GAP_S)
             except asyncio.TimeoutError:
-                # No audio for 1 s → phone mic inactive, give PC mic back
                 self._phone_active = False
+                await _flush_buffer()
                 continue
-            self._phone_active = True   # phone is streaming — silence PC mic
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
-                try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
-                    pass
+
+            self._phone_active = True
+
+            if self.session:
+                # Gemini Live is up — unchanged behaviour, straight passthrough.
+                with self._speaking_lock:
+                    speaking = self._is_speaking
+                if not speaking and not self.ui.muted:
+                    try:
+                        self.out_queue.put_nowait(item)
+                    except asyncio.QueueFull:
+                        pass
+                continue
+
+            # No Live session — accumulate for local transcription instead.
+            if buffer_started_at is None:
+                buffer_started_at = time.time()
+            buffer.extend(item["data"])
+            if (len(buffer) / BYTES_PER_SEC) >= MAX_UTTERANCE_S:
+                await _flush_buffer()
 
     def _on_phone_connected(self) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
@@ -1533,9 +1706,19 @@ class LiteLive:
     async def _process_dashboard_commands(self) -> None:
         while True:
             try:
-                text = await asyncio.wait_for(
+                item = await asyncio.wait_for(
                     self._dashboard._command_queue.get(), timeout=0.5
                 )
+                if not item:
+                    continue
+
+                # Typed dashboard commands are plain strings; phone-voice
+                # utterances (transcribed in _relay_phone_audio) are tagged
+                # dicts so we know to also speak the reply back to the phone.
+                if isinstance(item, dict):
+                    text, from_voice = item.get("text", ""), True
+                else:
+                    text, from_voice = item, False
                 if not text:
                     continue
 
@@ -1583,6 +1766,18 @@ class LiteLive:
                             "type": "log", "speaker": "lite", "text": reply_text,
                             "ts": datetime.now().isoformat(),
                         })
+                        if from_voice:
+                            # Best-effort spoken reply for phone voice, so a
+                            # fallback-mode voice conversation is actually a
+                            # conversation and not just a one-way transcript.
+                            audio_bytes = await self._synthesize_reply_audio_mp3(reply_text)
+                            if audio_bytes:
+                                await self._dashboard.broadcast({
+                                    "type": "tts_audio",
+                                    "mime": "audio/mpeg",
+                                    "audio_b64": base64.b64encode(audio_bytes).decode("ascii"),
+                                    "ts": datetime.now().isoformat(),
+                                })
             except asyncio.TimeoutError:
                 pass
             except Exception as e:
@@ -1600,8 +1795,15 @@ class LiteLive:
             self._dashboard = DashboardServer()
             self._dashboard.set_connect_callback(self._on_phone_connected)
             asyncio.create_task(self._dashboard.serve())
-            # Runs for the whole lifetime, not just inside an active session
+            # Both run for the whole app lifetime, not just inside an active
+            # Gemini Live session — _relay_phone_audio used to only exist
+            # inside the Live-session TaskGroup below, so phone voice input
+            # silently went nowhere the moment Live wasn't connected. It now
+            # decides per-chunk whether to forward to Live or transcribe
+            # locally via fallback, so it needs to always be running, exactly
+            # like _process_dashboard_commands already was.
             asyncio.create_task(self._process_dashboard_commands())
+            asyncio.create_task(self._relay_phone_audio())
         except Exception as e:
             print(f"[Dashboard] Disabled: {e}")
             self._dashboard = None
@@ -1719,8 +1921,9 @@ class LiteLive:
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
-                    if self._dashboard:
-                        tg.create_task(self._relay_phone_audio())
+                    # _relay_phone_audio is NOT started here — it's a
+                    # top-level task started once in run(), independent of
+                    # this Live session's lifetime (see comment there).
 
                     # Morning briefing — fires once per process launch (if enabled)
                     if not self._briefing_sent and get_brief_enabled():
