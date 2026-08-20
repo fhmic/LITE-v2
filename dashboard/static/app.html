@@ -220,7 +220,34 @@
       if (m.type === 'wake')          sys('Wake word detected — connecting…');
       if (m.type === 'sys')           sys(m.text);
       if (m.type === 'file_received') _onFileReceived(m);
+      if (m.type === 'tts_audio')     _playTtsAudio(m);
     };
+
+    // ── Phone playback for fallback-mode voice replies ──────────────────────
+    // Gemini Live's own spoken replies still play on the desktop's speakers
+    // (unchanged) — this is specifically for replies generated while no
+    // Live session is up (see _process_dashboard_commands in main.py),
+    // which otherwise had no way to be heard on the phone at all.
+    function _playTtsAudio(m) {
+      try {
+        const bin = atob(m.audio_b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: m.mime || 'audio/mpeg' });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => URL.revokeObjectURL(url);
+        audio.play().catch(err => {
+          // Mobile browsers block autoplay without a prior user gesture on
+          // the page — since this fires after the user already tapped to
+          // start the mic, it should be fine, but fail quietly either way
+          // rather than surfacing a console error to the user.
+          console.warn('[LITE] TTS playback blocked:', err);
+        });
+      } catch (err) {
+        console.warn('[LITE] Failed to play TTS audio:', err);
+      }
+    }
 
     function setStatus(s) {
       if (s === 'active') {
