@@ -49,8 +49,11 @@ BASE_DIR        = _get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5"
-DEFAULT_GROQ_MODEL   = "llama-3.3-70b-versatile"
+DEFAULT_CLAUDE_MODEL = "claude-sonnet-5"
+# llama-3.3-70b-versatile was deprecated by Groq 2026-06-17, hard shutdown
+# 2026-08-16 (console.groq.com/docs/deprecations) — openai/gpt-oss-120b is
+# Groq's official recommended replacement for that capability tier.
+DEFAULT_GROQ_MODEL   = "openai/gpt-oss-120b"
 GROQ_BASE_URL        = "https://api.groq.com/openai/v1"
 
 GEMINI_TIMEOUT_S     = 8      # hard cap on a single Gemini attempt
