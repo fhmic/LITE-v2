@@ -691,7 +691,13 @@ TOOL_DECLARATIONS = [
             "name, age, city, job, preferences, hobbies, relationships, projects, or future plans. "
             "Do NOT call for: weather, reminders, searches, or one-time commands. "
             "Do NOT announce that you are saving — just call it silently. "
-            "Values must be in English regardless of the conversation language."
+            "Values must be in English regardless of the conversation language. "
+            "SPECIAL RULE for identity.language: only save this if the user has given an "
+            "explicit, standing instruction to permanently change your speaking language "
+            "(e.g. 'always speak to me in Yoruba from now on', 'remember to reply in French'). "
+            "Never save identity.language just because the user said a word or phrase in "
+            "another language, code-switched briefly, or you replied in another language for "
+            "one exchange — that is not a standing preference and must not be persisted."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -852,9 +858,19 @@ class LiteLive:
             f"Your name is {self._asst_name}. "
             f"Always refer to yourself as {self._asst_name}.\n"
             f"{_addr}\n\n"
-            f"LANGUAGE: Default to English. Only speak another language if the user has "
-            f"addressed you in that language — never switch or open a conversation in "
-            f"anything other than English on your own initiative.\n\n"
+            f"LANGUAGE: English is your permanent default. Always speak and open every "
+            f"conversation in English. Switch to another language ONLY when the user gives "
+            f"an explicit, direct instruction that names the target language — e.g. "
+            f"'speak to me in French', 'reply in Yoruba', 'switch to Spanish'. Hearing the "
+            f"user say a word, phrase, or full sentence in another language is NOT such an "
+            f"instruction — do not infer a language switch from the language of their input, "
+            f"and do not treat a single foreign phrase as permission to reply in kind. If "
+            f"memory below shows a stored 'Language' field, treat it as background context "
+            f"ONLY, never as authorization to open or switch language on your own initiative "
+            f"— the live, explicit instruction rule above always overrides it. Once the user "
+            f"explicitly switches you, stay in that language for the rest of THIS conversation "
+            f"only; return to English next session unless they say to always use it. If asked "
+            f"to switch back to English, do so immediately.\n\n"
         )
 
         parts = [time_ctx, identity_ctx]
@@ -1318,12 +1334,15 @@ class LiteLive:
             e = identity.get(k, {})
             return (e.get("value", "") if isinstance(e, dict) else str(e)).strip()
 
-        # English is the default/startup language — the assistant speaks first
-        # here (before the user has said anything this session), so it must
-        # never open in a language the user hasn't already demonstrated a
-        # preference for. Only use a stored language if the user actually
-        # established it in a prior session.
-        lang = _val("language") or "English"
+        # English is ALWAYS the startup language — the assistant speaks first
+        # here, before the user has said anything this session, so there is
+        # no live signal to justify anything else. A stored identity.language
+        # value is deliberately NOT consulted: it can only have gotten there
+        # from a past detected phrase or a stale save, and using it here is
+        # exactly the "opens in a language I don't understand" bug. If the
+        # user wants LITE to always greet them in another language, that
+        # should be a deliberate, separate setting — not silently inferred.
+        lang = "English"
         name = _val("name")
         time_str = datetime.now().strftime("%H:%M")
 
@@ -1447,10 +1466,10 @@ class LiteLive:
             return
         self._session_log = []    # reset immediately so the next session starts clean
 
-        memory = load_memory()
-        lang_entry = memory.get("identity", {}).get("language", {})
-        lang = (lang_entry.get("value", "") if isinstance(lang_entry, dict) else str(lang_entry)).strip()
-        lang = lang or "English"
+        # Summaries are written by LITE, not spoken live to the user, and are
+        # fed back into future system-prompt memory context — so a bad stored
+        # language here would re-poison every future session. Always English.
+        lang = "English"
 
         convo = "\n".join(log[-40:])   # cap at last 40 turns to stay within token budget
         prompt = (
@@ -1503,9 +1522,9 @@ class LiteLive:
                 if not speaking and not recent_speech:
                     try:
                         alerts = await asyncio.to_thread(monitor_check_all)
-                        memory = load_memory()
-                        lang_e = memory.get("identity", {}).get("language", {})
-                        lang   = (lang_e.get("value", "") if isinstance(lang_e, dict) else str(lang_e)).strip() or "English"
+                        # Background alerts are LITE-initiated, same as the startup
+                        # briefing — no live user speech to justify anything but English.
+                        lang = "English"
                         for alert in alerts:
                             msg = (
                                 f"{alert}\n\n"

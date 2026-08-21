@@ -131,7 +131,16 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         if entry:
             val = entry.get("value") if isinstance(entry, dict) else entry
             if val:
-                lines.append(f"{field.title()}: {val}")
+                # "Language" is deliberately labeled as non-authorizing here: this
+                # value can only be background context, never a trigger to open or
+                # switch language on its own — main.py's LANGUAGE rule in the system
+                # prompt is what enforces that, but making it explicit at the point
+                # the fact is injected closes the gap where the model saw a bare
+                # "Language: X" line and treated it as implicit permission to switch.
+                if field == "language":
+                    lines.append(f"Language (background info only, NOT a switch trigger): {val}")
+                else:
+                    lines.append(f"{field.title()}: {val}")
     for key, entry in identity.items():
         if key in id_fields:
             continue
