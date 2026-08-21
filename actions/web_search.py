@@ -410,6 +410,171 @@ def _price(query: str) -> str:
     return _format_ddg(query, results)
 
 
+def _skill_profile_text() -> str:
+    """
+    Pulls the achievability-scoring context — known skills, credentials,
+    active projects, capital/team constraints — from long-term memory
+    (identity/business/projects categories) so scoring is grounded in what's
+    actually true rather than generic assumptions. Falls back to sane
+    defaults if memory hasn't been populated yet or isn't importable.
+    """
+    default = (
+        "- Chartered Accountant (CA), Head of Finance & Administration\n"
+        "- Full-stack dev: Node.js, Python, React/Vite/Next.js/TanStack, PyQt6\n"
+        "- Deep Nigerian tax/regulatory knowledge (CITA, NTA 2025, CBN rules)\n"
+        "- Based in Lagos, Nigeria — remote/international work preferred\n"
+        "- Building solo, alongside a full-time job — no team/employees yet, "
+        "no existing crypto trading infrastructure or licensed capital markets activity"
+    )
+    try:
+        from memory.memory_manager import load_memory
+        memory = load_memory()
+        parts = []
+        for cat in ("identity", "business", "projects"):
+            for key, entry in memory.get(cat, {}).items():
+                val = entry.get("value") if isinstance(entry, dict) else entry
+                if val:
+                    parts.append(f"- {key.replace('_', ' ').title()}: {val}")
+        if parts:
+            return "\n".join(parts[:20])
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Skill profile from memory unavailable ({e}) — using defaults")
+    return default
+
+
+def _parse_json_block(text: str) -> dict | None:
+    """Extracts a JSON object from a model response, tolerating ```json
+    code fences or stray text before/after the braces. Returns None (never
+    raises) if nothing parseable is found."""
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(cleaned[start:end + 1])
+    except Exception:
+        return None
+
+
+def _verify_opportunity_claims(opportunities: list[dict]) -> dict[str, str]:
+    """
+    Runs one targeted DDG search per opportunity against its self-flagged
+    'key_claim' (a specific number, deadline, or program name pulled out
+    during generation) so the scoring pass has something to check the claim
+    against instead of trusting the generation pass at face value. Capped at
+    5 opportunities/searches — one per opportunity is enough signal without
+    hammering DDG's rate limit. Never raises; a failed lookup just means
+    that opportunity's claim gets scored as unverifiable.
+    """
+    verification: dict[str, str] = {}
+    for opp in opportunities[:5]:
+        title = (opp.get("title") or "").strip()
+        claim = (opp.get("key_claim") or "").strip()
+        if not title or not claim:
+            continue
+        try:
+            results = _ddg_search(claim, max_results=2)
+            verification[title] = _format_ddg(claim, results) if results else "No corroborating results found."
+        except Exception as e:
+            print(f"[WebSearch] ⚠️ Claim verification failed for {title!r}: {e}")
+            verification[title] = "Verification search failed — treat claim as unconfirmed."
+    return verification
+
+
+def _score_opportunities(
+    opportunities: list[dict], verification: dict[str, str], skill_profile: str
+) -> dict[str, dict]:
+    """
+    Second AI-client pass: given the skill profile and each opportunity's
+    verification snippet, returns achievability_score (1-5), a one-line
+    reason, claim_status, and an optional regulatory_flag per opportunity —
+    keyed by title. Returns {} on any failure so the caller can fall back to
+    presenting the unscored, unsorted list rather than losing the results.
+    """
+    if not opportunities:
+        return {}
+
+    opp_blocks = []
+    for opp in opportunities:
+        title = opp.get("title", "Untitled")
+        opp_blocks.append(
+            f"### {title}\n"
+            f"Claim to check: {opp.get('key_claim', 'none stated')}\n"
+            f"Verification search result: {verification.get(title, 'not checked')}\n"
+            f"Income/TTFD claimed: {opp.get('income_potential', '')}\n"
+            f"Capital/skills claimed: {opp.get('capital_skills', '')}\n"
+            f"Risk level claimed: {opp.get('risk_level', '')}"
+        )
+
+    score_prompt = (
+        "You are a skeptical achievability reviewer. You are NOT writing new opportunities — "
+        "you are scoring ones already drafted, against this specific person's actual profile "
+        "and against real verification search results.\n\n"
+        f"Person's actual skills/constraints:\n{skill_profile}\n\n"
+        f"Opportunities to score:\n\n{chr(10).join(opp_blocks)}\n\n"
+        "For EACH opportunity (match by exact title), return an achievability_score from 1 "
+        "(vague, stale, or unrealistic given this person's actual profile) to 5 (concrete, "
+        "verified, and directly executable with what they already have). Score DOWN hard for: "
+        "claims contradicted or unconfirmed by the verification search result, deadlines that "
+        "have likely already passed, income-to-capital ratios that look implausible, required "
+        "skills/team/licenses this person doesn't have, and anything involving crypto trading, "
+        "exchanges, or securities activity in Nigeria without noting CBN regulatory exposure.\n\n"
+        "Respond with ONLY this JSON, no other text:\n"
+        '{"scored": [{"title": "...", "achievability_score": 1-5, '
+        '"score_reason": "one terse sentence", '
+        '"claim_status": "confirmed|stale|unverifiable|contradicted", '
+        '"regulatory_flag": "short note or null"}]}'
+    )
+
+    try:
+        from core.ai_client import generate_content
+        resp = generate_content(score_prompt)
+        parsed = _parse_json_block(resp.text if resp else "")
+        if not parsed or "scored" not in parsed:
+            return {}
+        return {item.get("title", ""): item for item in parsed["scored"] if item.get("title")}
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Opportunity scoring failed ({e}) — returning unscored list")
+        return {}
+
+
+def _format_scored_opportunities(focus: str, opportunities: list[dict], scores: dict[str, dict]) -> str:
+    """Renders the final ranked brief. Opportunities with a score sort to the
+    top, highest achievability first; unscored ones (scoring pass failed or
+    didn't return a match) trail at the end in original order."""
+    def _sort_key(opp):
+        s = scores.get(opp.get("title", ""), {})
+        has_score = "achievability_score" in s
+        return (0 if has_score else 1, -s.get("achievability_score", 0))
+
+    ranked = sorted(opportunities, key=_sort_key)
+
+    lines = [f"Opportunity brief — {focus}\n"]
+    for i, opp in enumerate(ranked, 1):
+        title = opp.get("title", "Untitled")
+        s = scores.get(title, {})
+        lines.append(f"{i}. {title}")
+        if "achievability_score" in s:
+            flag = f" ⚠ {s['regulatory_flag']}" if s.get("regulatory_flag") else ""
+            lines.append(
+                f"   Achievability: {s['achievability_score']}/5 "
+                f"[{s.get('claim_status', 'unverified')}] — {s.get('score_reason', '')}{flag}"
+            )
+        lines.append(f"   What: {opp.get('what', '')}")
+        lines.append(f"   Why now: {opp.get('why_now', '')}")
+        lines.append(f"   Income potential: {opp.get('income_potential', '')}")
+        lines.append(f"   Capital/skills: {opp.get('capital_skills', '')}")
+        lines.append(f"   Risk: {opp.get('risk_level', '')}")
+        lines.append(f"   Next action: {opp.get('next_action', '')}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def _opportunities(query: str) -> str:
     """
     LITE's core mode: surfaces real, executable business / income opportunities
@@ -418,11 +583,25 @@ def _opportunities(query: str) -> str:
     options are both in scope — each must come with an actual next step, not
     just a description.
 
-    Pipeline: DDG pulls today's signal (fresh listings, market moves, demand
-    spikes, funding/grant news, remote-work trends) across several angles,
-    then the shared AI-client fallback chain (Gemini → Claude → Groq → custom)
-    turns that into a structured, actionable brief. Falls back to raw DDG
-    results if no synthesis provider is configured or all fail.
+    Pipeline (four stages, each with a graceful fallback):
+      1. Generate  — DDG pulls today's signal across several angles, then the
+                      AI-client fallback chain drafts 3-5 opportunities as
+                      structured JSON (not freeform prose), each flagging one
+                      specific checkable claim (a number, deadline, or program
+                      name).
+      2. Verify    — one targeted DDG search per opportunity against its
+                      flagged claim, so stale or conflated facts (expired
+                      deadlines, wrong program, mismatched eligibility) get
+                      caught before they reach the brief.
+      3. Score     — a second AI-client pass rates each opportunity's
+                      achievability 1-5 against this person's actual skill
+                      profile (pulled from memory) and the verification
+                      result, flagging regulatory exposure explicitly.
+      4. Sort      — highest achievability first.
+
+    If JSON generation, verification, or scoring fails at any stage, it
+    degrades to the previous behavior (one freeform synthesized brief, then
+    raw DDG results) rather than ever hard-failing.
     """
     focus = query.strip() if query.strip() else "international remote income and business opportunities"
 
@@ -442,6 +621,59 @@ def _opportunities(query: str) -> str:
 
     results_text = _format_ddg(focus, combined_results) if combined_results else f"No fresh signal found for: {focus}"
 
+    provider = _get_search_provider()
+    if provider == "skip":
+        return f"Opportunity signal — {focus}\n\n{results_text}"
+
+    generation_prompt = (
+        "You are a sharp, no-fluff business intelligence analyst working for a chartered "
+        "accountant and fintech builder based in Lagos, Nigeria, who wants to build genuine "
+        "income streams alongside his 9-to-5 — international-first where possible.\n\n"
+        f"Focus area: {focus}\n\n"
+        f"Raw signal gathered today:\n{results_text}\n\n"
+        "Produce 3-5 concrete opportunities. Prioritize ones executable remotely/"
+        "internationally and that leverage finance, accounting, or software skills where "
+        "relevant, but don't force-fit — include genuinely strong options outside that lane "
+        "too. Be specific, not generic.\n\n"
+        "For EACH opportunity, also pull out exactly ONE specific, independently checkable "
+        "claim from it — a dollar figure, a deadline, a program/grant name, an eligibility "
+        "requirement — as 'key_claim'. Pick the claim doing the most work in making the "
+        "opportunity sound credible; that's the one worth verifying.\n\n"
+        "Respond with ONLY this JSON, no other text, no markdown fences:\n"
+        '{"opportunities": [{"title": "short name", "what": "one line", '
+        '"why_now": "the signal that makes it timely", '
+        '"income_potential": "realistic income + time-to-first-dollar", '
+        '"capital_skills": "capital and skills required", '
+        '"risk_level": "Conservative|Moderate|Aggressive", '
+        '"next_action": "the very next concrete step to take today", '
+        '"key_claim": "the one specific fact to verify"}]}'
+    )
+
+    try:
+        from core.ai_client import generate_content
+        resp = generate_content(generation_prompt)
+        parsed = _parse_json_block(resp.text if resp else "")
+        opportunities = parsed.get("opportunities") if parsed else None
+        if not opportunities or not isinstance(opportunities, list):
+            raise ValueError("Generation pass did not return usable opportunity JSON")
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Opportunities JSON generation failed ({e}) — falling back to freeform brief")
+        return _opportunities_freeform_fallback(focus, results_text)
+
+    try:
+        verification = _verify_opportunity_claims(opportunities)
+        skill_profile = _skill_profile_text()
+        scores = _score_opportunities(opportunities, verification, skill_profile)
+        return _format_scored_opportunities(focus, opportunities, scores)
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Verify/score stage failed ({e}) — returning unscored opportunities")
+        return _format_scored_opportunities(focus, opportunities, {})
+
+
+def _opportunities_freeform_fallback(focus: str, results_text: str) -> str:
+    """Last-resort fallback if structured JSON generation fails outright —
+    the original single-pass freeform brief, so opportunities mode still
+    returns something useful rather than nothing."""
     brief_prompt = (
         "You are a sharp, no-fluff business intelligence analyst working for a chartered "
         "accountant and fintech builder based in Lagos, Nigeria, who wants to build genuine "
@@ -455,22 +687,15 @@ def _opportunities(query: str) -> str:
         "4. Capital/skills required\n"
         "5. Risk level: Conservative / Moderate / Aggressive\n"
         "6. The very next concrete action to take today\n\n"
-        "Prioritize opportunities executable remotely/internationally and that leverage "
-        "finance, accounting, or software skills where relevant, but don't force-fit — "
-        "include genuinely strong options outside that lane too. Be specific, not generic. "
-        "No disclaimers, no filler."
+        "Be specific, not generic. No disclaimers, no filler."
     )
-
-    provider = _get_search_provider()
-    if provider != "skip":
-        try:
-            from core.ai_client import generate_content
-            resp = generate_content(brief_prompt)
-            if resp and resp.text and len(resp.text.strip()) > 60:
-                return resp.text.strip()
-        except Exception as e:
-            print(f"[WebSearch] ⚠️ Opportunities synthesis failed ({e}) — returning raw signal")
-
+    try:
+        from core.ai_client import generate_content
+        resp = generate_content(brief_prompt)
+        if resp and resp.text and len(resp.text.strip()) > 60:
+            return resp.text.strip()
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Freeform fallback synthesis failed ({e}) — returning raw signal")
     return f"Opportunity signal — {focus}\n\n{results_text}"
 
 
