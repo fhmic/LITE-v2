@@ -8,12 +8,16 @@
 
   "_comment_fallback": "Used automatically if Gemini fails or its quota is exhausted, for text-based tools (code_helper, dev_agent, self_maintain, search summaries, etc). Tried in this order: Claude, then Groq, then a custom/local endpoint — configure any/all.",
   "anthropic_api_key": "",
-  "anthropic_model": "claude-sonnet-4-5",
+  "anthropic_model": "claude-sonnet-5",
   "groq_api_key": "",
-  "groq_model": "llama-3.3-70b-versatile",
+  "groq_model": "openai/gpt-oss-120b",
   "fallback_api_url": "",
   "fallback_api_key": "",
   "fallback_model": "",
+
+  "_comment_gas": "Connects the affiliate_growth_agent tool to GAS (Growth Agent Service) — the always-on Cloudflare Worker that keeps drafting content and tracking PartnerStack/Exness even while LITE isn't running. Get gas_worker_url from `wrangler deploy`'s output; gas_worker_key is the WORKER_SHARED_SECRET you set via `wrangler secret put`. Leave blank to disable assign_job/get_report (the rest of affiliate_growth_agent still works without it).",
+  "gas_worker_url": "",
+  "gas_worker_key": "",
 
   "_comment_search": "Powers web search / news summaries. DuckDuckGo is always used as the no-key baseline regardless of this setting.",
   "search_provider": "gemini",
