@@ -75,6 +75,7 @@ from actions.affiliate_growth_agent import affiliate_growth_agent
 from actions.web_search        import web_search as web_search_action
 from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
+from actions.obsidian          import obsidian_notes
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
 from actions.background_monitor import (
@@ -508,6 +509,34 @@ TOOL_DECLARATIONS = [
             "type": "OBJECT",
             "properties": {
                 "state": {"type": "STRING", "description": "'mute' or 'unmute'. If omitted, toggles the current state."},
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "obsidian_notes",
+        "description": (
+            "Reads, searches, or writes to the user's Obsidian vault. Every conversation is "
+            "already auto-journaled to today's dated note, and every business-opportunities "
+            "brief is already auto-saved to its own dated note in a separate 'Business "
+            "Opportunities' folder — neither needs to be requested. This tool is mainly for "
+            "RECALLING past discussions ('what did we talk about last week regarding X', "
+            "'what did I decide about the SaaS idea') and for taking notes on demand. Use "
+            "mode='search' with scope='vault' to search across both the conversation journal "
+            "and past opportunity briefs together, mode='read' for a specific day's full log, "
+            "mode='append' to log something specific right now, mode='create' for a new "
+            "standalone note (e.g. a business plan doc), mode='list' to see recent journal days."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "mode":   {"type": "STRING", "description": "search (default) | read | append | create | list"},
+                "query":  {"type": "STRING", "description": "For mode=search — keyword(s) to look for."},
+                "date":   {"type": "STRING", "description": "For mode=read — 'YYYY-MM-DD', 'today', or 'yesterday' (default: today)."},
+                "text":   {"type": "STRING", "description": "For mode=append — what to log. For mode=create — the note's content."},
+                "name":   {"type": "STRING", "description": "For mode=create — the note's filename (without .md)."},
+                "folder": {"type": "STRING", "description": "For mode=create — optional subfolder within the vault."},
+                "scope":  {"type": "STRING", "description": "For mode=search — 'journal' (default, LITE's own entries only) or 'vault' (search everything)."},
             },
             "required": []
         }
@@ -1031,6 +1060,10 @@ class LiteLive:
                 self.ui.set_muted(target)
                 result = f"Microphone {'muted' if target else 'active'}."
 
+            elif name == "obsidian_notes":
+                r = await loop.run_in_executor(None, lambda: obsidian_notes(parameters=args, player=self.ui))
+                result = r or "Done."
+
             elif name == "web_search":
                 r = await loop.run_in_executor(None, lambda: web_search_action(parameters=args, player=self.ui))
                 result = r or "Done."
@@ -1434,6 +1467,18 @@ class LiteLive:
                     # Show on UI content panel immediately
                     self.ui.show_content("OPPORTUNITIES — today's business & income brief", news_text)
 
+                    # Save to the Obsidian vault too, if configured — deterministic
+                    # path (Business Opportunities/YYYY-MM-DD.md), called directly
+                    # from code so it never depends on the model remembering to do
+                    # it. Never lets a save hiccup affect the briefing flow.
+                    try:
+                        from actions.obsidian import save_opportunities_brief, has_vault_configured
+                        if has_vault_configured():
+                            msg = await asyncio.to_thread(save_opportunities_brief, news_text, biz_focus)
+                            self.ui.write_log(f"SYS: {msg}")
+                    except Exception as e:
+                        print(f"[Obsidian] ⚠️ Opportunities brief save failed: {e}")
+
                     p2 = (
                         f"[BRIEFING] Here is today's business & income opportunities brief:\n{news_text}\n\n"
                         "Pick the single strongest opportunity, summarise it in one or two sentences "
@@ -1485,6 +1530,20 @@ class LiteLive:
                 save_session_summary(summary, lang)
         except Exception as e:
             print(f"[Memory] ⚠️ Session summary failed: {e}")
+
+        # Auto-journal the full conversation to today's Obsidian daily note
+        # (if a vault is configured) — the quick summary above is for LITE's
+        # own memory; this is the full-fidelity, human-searchable record the
+        # user actually reads back later. Never lets a journaling hiccup
+        # affect the session-save flow.
+        try:
+            from actions.obsidian import append_to_daily_note, has_vault_configured
+            if has_vault_configured():
+                journal_text = "\n".join(f"- {line}" for line in log[-60:])
+                msg = await asyncio.to_thread(append_to_daily_note, journal_text)
+                self.ui.write_log(f"SYS: {msg}")
+        except Exception as e:
+            print(f"[Obsidian] ⚠️ Auto-journal failed: {e}")
 
     # ── System monitor ──────────────────────────────────────────────────────────
 

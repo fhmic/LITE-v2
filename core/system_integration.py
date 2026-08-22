@@ -1,7 +1,7 @@
 #system_integration.py
 """
 OS-level integration: desktop shortcuts, launch-on-startup registration, and
-the LITE arc-reactor .ico generator. Ported unchanged from the old
+the LITE circuit/hologram .ico generator. Ported unchanged from the old
 QPainter-based ui.py — this logic is OS/filesystem work, not GUI-specific,
 so it lives here now and both the new web-based HUD and anything else can
 call into it directly.
@@ -90,50 +90,92 @@ def get_desktop_dir() -> Path:
 # ── Icon generation ──────────────────────────────────────────────────────────
 
 def build_lite_icon(out_path: Path) -> bool:
-    """Renders a LITE arc-reactor icon at 4x resolution and saves a multi-res .ico."""
+    """
+    Renders LITE's circuit/hologram emblem — a HUD-style ring with radiating
+    circuit traces around a layered hexagon core, in the app's own accent
+    green — and saves a multi-res .ico. This is the fallback generator used
+    only when config/lite.ico is missing entirely; it exists so a fresh
+    setup (or a wiped config folder) regenerates the SAME icon shipped in
+    the repo, not some other placeholder design.
+    """
     try:
         import math
         import PIL.Image
         import PIL.ImageDraw
-        import PIL.ImageFilter
     except ImportError:
         return False
 
-    CYAN, DIM, DARK, GLOW, WHITE = (0, 212, 255), (0, 100, 140), (0, 6, 10), (0, 160, 200), (220, 240, 255)
+    GREEN_BRIGHT = (0, 255, 65, 255)
+    GREEN_MID    = (0, 179, 45, 255)
+    GREEN_CORE   = (4, 26, 10, 235)
+    TRANSPARENT  = (0, 0, 0, 0)
+    SS = 4  # supersample factor for anti-aliasing
 
-    def _render(sz: int):
-        S = sz * 4
-        img = PIL.Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    def _hexagon(cx, cy, r, rot=0.0):
+        return [
+            (cx + r * math.cos(rot + i * (math.pi / 3)), cy + r * math.sin(rot + i * (math.pi / 3)))
+            for i in range(6)
+        ]
+
+    def _render(sz: int, detailed: bool):
+        s = sz * SS
+        img = PIL.Image.new("RGBA", (s, s), TRANSPARENT)
         d = PIL.ImageDraw.Draw(img)
-        cx = cy = S // 2
-        R = S // 2 - 2
-        d.ellipse([cx-R, cy-R, cx+R, cy+R], fill=(*DARK, 255))
-        lw = max(2, S // 40)
-        d.ellipse([cx-R, cy-R, cx+R, cy+R], outline=(*CYAN, 220), width=lw)
-        R2 = int(R * 0.72)
-        d.ellipse([cx-R2, cy-R2, cx+R2, cy+R2], outline=(*DIM, 180), width=max(1, lw // 2))
-        R_inner, R_outer = int(R * 0.30), int(R * 0.62)
-        spoke_w = max(1, S // 80)
-        for i in range(6):
-            angle = math.radians(i * 60 - 30)
-            x1 = cx + int(R_inner * math.cos(angle)); y1 = cy + int(R_inner * math.sin(angle))
-            x2 = cx + int(R_outer * math.cos(angle)); y2 = cy + int(R_outer * math.sin(angle))
-            d.line([x1, y1, x2, y2], fill=(*GLOW, 200), width=spoke_w)
-        Ri = int(R * 0.26)
-        d.ellipse([cx-Ri, cy-Ri, cx+Ri, cy+Ri], outline=(*CYAN, 255), width=max(2, lw))
-        glow_layer = PIL.Image.new("RGBA", (S, S), (0, 0, 0, 0))
-        gd = PIL.ImageDraw.Draw(glow_layer)
-        Rc = int(R * 0.13)
-        gd.ellipse([cx-Rc*2, cy-Rc*2, cx+Rc*2, cy+Rc*2], fill=(*CYAN, 110))
-        glow_layer = glow_layer.filter(PIL.ImageFilter.GaussianBlur(S // 14))
-        img = PIL.Image.alpha_composite(img, glow_layer)
-        d = PIL.ImageDraw.Draw(img)
-        d.ellipse([cx-Rc, cy-Rc, cx+Rc, cy+Rc], fill=(*WHITE, 255))
+        cx = cy = s / 2
+        hex_r = s * (0.24 if detailed else 0.26)
+
+        if detailed:
+            outer_r, ring_r = s * 0.46, s * 0.38
+            tick_w = max(2, int(s * 0.012))
+            for i in range(24):
+                a = i * (2 * math.pi / 24)
+                long_tick = (i % 6 == 0)
+                r1, r2 = outer_r, outer_r - (s * 0.045 if long_tick else s * 0.022)
+                d.line(
+                    [cx + r1 * math.cos(a), cy + r1 * math.sin(a), cx + r2 * math.cos(a), cy + r2 * math.sin(a)],
+                    fill=(GREEN_BRIGHT if long_tick else GREEN_MID), width=tick_w,
+                )
+            d.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r], outline=GREEN_BRIGHT, width=max(2, int(s * 0.018)))
+
+            for deg in (20, 65, 140, 200, 250, 310):
+                a = math.radians(deg)
+                x0, y0 = cx + ring_r * math.cos(a), cy + ring_r * math.sin(a)
+                elbow_r = ring_r + s * 0.09
+                xe, ye = cx + elbow_r * math.cos(a), cy + elbow_r * math.sin(a)
+                perp = a + math.pi / 2
+                jog = s * 0.045 * (1 if deg in (20, 140, 250) else -1)
+                xj, yj = xe + jog * math.cos(perp), ye + jog * math.sin(perp)
+                pad_r_out = ring_r + s * 0.16
+                xp, yp = cx + pad_r_out * math.cos(a), cy + pad_r_out * math.sin(a)
+
+                line_w = max(2, int(s * 0.014))
+                d.line([x0, y0, xe, ye], fill=GREEN_MID, width=line_w)
+                d.line([xe, ye, xj, yj], fill=GREEN_MID, width=line_w)
+                d.line([xj, yj, xp, yp], fill=GREEN_MID, width=line_w)
+
+                pad_r = s * 0.02
+                d.ellipse([xp - pad_r, yp - pad_r, xp + pad_r, yp + pad_r], fill=GREEN_BRIGHT)
+                node_r = s * 0.012
+                d.ellipse([x0 - node_r, y0 - node_r, x0 + node_r, y0 + node_r], fill=GREEN_BRIGHT)
+
+            d.polygon(_hexagon(cx, cy, hex_r, rot=math.pi / 6), fill=GREEN_CORE, outline=GREEN_BRIGHT, width=max(2, int(s * 0.016)))
+            d.polygon(_hexagon(cx, cy, hex_r * 0.62, rot=math.pi / 6), outline=GREEN_MID, width=max(1, int(s * 0.008)))
+            dot_r = s * 0.035
+        else:
+            # Simplified mark for small sizes — bold ring + hex only, no fine
+            # traces, so it stays legible instead of turning to mud at 16-48px.
+            ring_r = s * 0.40
+            d.ellipse([cx - ring_r, cy - ring_r, cx + ring_r, cy + ring_r], outline=GREEN_BRIGHT, width=max(2, int(s * 0.035)))
+            d.polygon(_hexagon(cx, cy, hex_r, rot=math.pi / 6), fill=GREEN_CORE, outline=GREEN_BRIGHT, width=max(2, int(s * 0.03)))
+            dot_r = s * 0.05
+
+        d.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], fill=GREEN_BRIGHT)
         return img.resize((sz, sz), PIL.Image.LANCZOS)
 
     try:
         sizes = [256, 128, 64, 48, 32, 16]
-        frames = [_render(s) for s in sizes]
+        detailed_cutoff = 64  # 64px and up get the full circuit detail
+        frames = [_render(s, detailed=(s >= detailed_cutoff)) for s in sizes]
         frames[0].save(out_path, format="ICO", append_images=frames[1:], sizes=[(s, s) for s in sizes])
         return True
     except Exception as e:

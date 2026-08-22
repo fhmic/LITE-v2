@@ -543,6 +543,7 @@
         <button class="menu-btn" data-page="page-behaviour">☀ BEHAVIOUR</button>
         <button class="menu-btn" data-page="page-system">⚙ SYSTEM</button>
         <button class="menu-btn" data-page="page-remote">📱 REMOTE CONTROL</button>
+        <button class="menu-btn" data-page="page-journal">🗂 OBSIDIAN JOURNAL</button>
       </div>
 
       <!-- ═══ API & PROVIDERS ═══ -->
@@ -602,6 +603,15 @@
       <div class="setup-page hidden" id="page-remote">
         <p class="setup-note">Generates a QR code / link to control LITE from your phone, over your local network.</p>
         <button id="remoteBtn" class="toggle-btn">◉ CONNECT PHONE / REMOTE CONTROL</button>
+      </div>
+
+      <!-- ═══ OBSIDIAN JOURNAL ═══ -->
+      <div class="setup-page hidden" id="page-journal">
+        <p class="setup-note">Every conversation gets journaled automatically to a dated note in a dedicated "LITE Journal" folder — never mixed into your own notes. Optional; leave blank to disable.</p>
+        <label>Vault folder path</label>
+        <input id="setupVaultPath" type="text" placeholder="C:\Users\you\Documents\MyVault (optional)" />
+        <button id="vaultBrowseBtn" class="toggle-btn">📁 BROWSE…</button>
+        <button id="setupVaultSubmit" class="setup-submit">▸ SAVE</button>
       </div>
 
       <button id="setupClose" class="setup-close-btn">✕ CLOSE</button>
@@ -955,6 +965,7 @@ const SETUP_TITLES = {
   'page-behaviour':  'BEHAVIOUR',
   'page-system':     'SYSTEM',
   'page-remote':     'REMOTE CONTROL',
+  'page-journal':    'OBSIDIAN JOURNAL',
 };
 function showSetupPage(pageId){
   document.querySelectorAll('.setup-page').forEach(p => p.classList.add('hidden'));
@@ -1059,6 +1070,17 @@ document.getElementById('remoteBtn').addEventListener('click', ()=>{
     pushLog('ERR: bridge unavailable — cannot request remote link.');
   }
 });
+
+// ---------- setup modal: Obsidian journal ----------
+document.getElementById('vaultBrowseBtn').addEventListener('click', ()=>{
+  if(window.pybridge) window.pybridge.requestVaultBrowse();
+});
+document.getElementById('setupVaultSubmit').addEventListener('click', ()=>{
+  const path = document.getElementById('setupVaultPath').value.trim();
+  if(window.pybridge) window.pybridge.submitVaultPath(path);
+  pushLog('Settings: Obsidian vault path saved.');
+});
+
 document.getElementById('setupClose').addEventListener('click', ()=>{
   document.getElementById('setupModal').classList.remove('visible');
 });
@@ -1221,12 +1243,16 @@ function initBridge(){
       onAssistantName: (name) => {
         document.getElementById('brandMark').textContent = (name || 'LITE').toUpperCase();
       },
+      onVaultPathChosen: (path) => {
+        if(path) document.getElementById('setupVaultPath').value = path;
+      },
       onSetupNeeded: (currentJson) => {
         try{
           const cur = JSON.parse(currentJson || '{}');
           if(cur.os_system)       document.getElementById('setupOs').value = cur.os_system;
           if(cur.assistant_name)  document.getElementById('setupAsstName').value = cur.assistant_name;
           if(cur.user_name)       document.getElementById('setupUserName').value = cur.user_name;
+          if(cur.obsidian_vault_path) document.getElementById('setupVaultPath').value = cur.obsidian_vault_path;
           if(cur.ui_color){
             document.getElementById('setupColor').value = cur.ui_color;
             applyAccentColor(cur.ui_color);

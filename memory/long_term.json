@@ -1,14 +1,45 @@
 {
   "identity": {
     "language": {
-      "value": "English",
-      "updated": "2026-08-15"
+      "value": "Chinese",
+      "updated": "2026-08-21"
+    },
+    "name": {
+      "value": "Felix Michael",
+      "updated": "2026-08-20"
     }
   },
-  "preferences": {},
+  "preferences": {
+    "hobby": {
+      "value": "Sneaking thrill",
+      "updated": "2026-08-20"
+    },
+    "file_dating_format": {
+      "value": "YYYY-MM-DD prefix for business briefs",
+      "updated": "2026-08-21"
+    },
+    "brief_save_path": {
+      "value": "Business Opportunities/Daily Briefs",
+      "updated": "2026-08-21"
+    }
+  },
   "projects": {},
   "relationships": {},
   "wishes": {},
   "notes": {},
-  "sessions": []
+  "sessions": [],
+  "business": {
+    "partnerstack_account": {
+      "value": "Active account, applying for affiliate marketing products",
+      "updated": "2026-08-20"
+    },
+    "partnerstack_login": {
+      "value": "Successfully logged in",
+      "updated": "2026-08-20"
+    },
+    "website_url": {
+      "value": "felixmichel.github.io",
+      "updated": "2026-08-20"
+    }
+  }
 }

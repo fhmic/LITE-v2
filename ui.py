@@ -147,6 +147,8 @@ class Bridge(QObject):
     toggleFullscreenRequest = pyqtSignal()
     remoteConnectRequest    = pyqtSignal()
     settingsOpenRequest     = pyqtSignal()
+    vaultBrowseRequest      = pyqtSignal()
+    vaultPathSubmitted      = pyqtSignal(str)
     hudReady          = pyqtSignal()
 
     @pyqtSlot(str)
@@ -200,6 +202,14 @@ class Bridge(QObject):
     @pyqtSlot()
     def requestSettingsOpen(self):
         self.settingsOpenRequest.emit()
+
+    @pyqtSlot()
+    def requestVaultBrowse(self):
+        self.vaultBrowseRequest.emit()
+
+    @pyqtSlot(str)
+    def submitVaultPath(self, path: str):
+        self.vaultPathSubmitted.emit(path)
 
     @pyqtSlot()
     def notifyHudReady(self):
@@ -290,6 +300,8 @@ class HudWindow(QMainWindow):
         self._bridge.toggleFullscreenRequest.connect(self._on_toggle_fullscreen)
         self._bridge.remoteConnectRequest.connect(self._on_remote_connect)
         self._bridge.settingsOpenRequest.connect(self._js_setup_needed)
+        self._bridge.vaultBrowseRequest.connect(self._on_vault_browse)
+        self._bridge.vaultPathSubmitted.connect(self._on_vault_path_submitted)
         self._bridge.hudReady.connect(self._on_hud_ready)
 
         self._view.load(QUrl(self._http_server.url("index.html")))
@@ -455,6 +467,26 @@ class HudWindow(QMainWindow):
         self._assistant_name = name
         self._run_js(f"window.LiteHud && window.LiteHud.onAssistantName({json.dumps(name)})")
         self._log_sig.emit(f"SYS: Assistant settings saved.")
+
+    def _on_vault_browse(self):
+        path = QFileDialog.getExistingDirectory(self, "Select your Obsidian vault folder")
+        if path:
+            self._run_js(f"window.LiteHud && window.LiteHud.onVaultPathChosen({json.dumps(path)})")
+
+    def _on_vault_path_submitted(self, path: str):
+        path = (path or "").strip()
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        existing = _read_full_config()
+        existing["obsidian_vault_path"] = path
+        API_FILE.write_text(json.dumps(existing, indent=4), encoding="utf-8")
+        if path and not Path(path).is_dir():
+            self._toast_sig.emit(
+                "OBSIDIAN", f"'{path}' doesn't look like a real folder — saved anyway, but double-check it."
+            )
+        elif path:
+            self._log_sig.emit(f"SYS: Obsidian vault set to {path}. Conversations will be journaled there.")
+        else:
+            self._log_sig.emit("SYS: Obsidian journaling disabled (no vault path set).")
 
     def _on_toggle_brief(self):
         from memory.config_manager import get_brief_enabled, save_brief_enabled
